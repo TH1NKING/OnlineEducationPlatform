@@ -2,68 +2,79 @@
   <div class="home-container">
     <el-header class="header">
       <div class="logo-area">
-        <el-icon class="logo-icon" :size="30" color="#409EFF"><ElementPlus /></el-icon>
-        <span class="logo-text">EduPlatform 在线教育</span>
+        <div class="logo-bg"><el-icon size="20" color="#fff"><ElementPlus /></el-icon></div>
+        <span class="logo-text">EduPlatform</span>
       </div>
       
       <div class="user-area">
-        <span class="welcome-text">你好, {{ username }} ({{ roleName }})</span>
-        <el-button type="primary" link @click="$router.push('/profile')">
-          <el-icon><User /></el-icon> 个人中心
-        </el-button>
-        <el-divider direction="vertical" />
-        <el-button type="danger" link @click="logout">
-          <el-icon><SwitchButton /></el-icon> 退出
-        </el-button>
+        <el-avatar :size="32" :src="userAvatar" style="background:#409EFF">{{ username.charAt(0) }}</el-avatar>
+        <el-dropdown trigger="click">
+          <span class="user-link">
+            {{ username }} <el-tag size="small" effect="plain" round style="margin: 0 5px">{{ roleName }}</el-tag>
+            <el-icon><CaretBottom /></el-icon>
+          </span>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item :icon="User" @click="$router.push('/profile')">个人中心</el-dropdown-item>
+              <el-dropdown-item divided :icon="SwitchButton" @click="logout" style="color: #F56C6C">退出登录</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
     </el-header>
 
     <div class="main-content">
       
-      <div v-if="userRole === 'student'">
-        <div class="section-title">
-          <h3>🔥 热门课程推荐</h3>
+      <div v-if="userRole === 'student'" class="student-view">
+        <div class="welcome-banner">
+          <h2>👋 嗨，{{ username }}，今天想学点什么？</h2>
+          <p>探索最新技术，提升你的核心竞争力</p>
         </div>
         
-        <el-carousel :interval="4000" type="card" height="220px" v-if="hotCourses.length > 0">
-          <el-carousel-item v-for="item in hotCourses" :key="item.ID">
-            <div class="hot-card" @click="goToDetail(item.ID)">
-              <img :src="item.cover_image || `https://picsum.photos/seed/${item.ID}/600/300`" class="hot-img"/>
-              <div class="hot-info">
-                <h3>{{ item.title }}</h3>
-                <p>热度: {{ item.view_count }} 🔥</p>
+        <div v-if="hotCourses.length > 0" class="section-block">
+          <h3 class="section-title"><el-icon color="#ff6b6b"><hot-water /></el-icon> 热门推荐</h3>
+          <el-carousel :interval="5000" type="card" height="240px" class="hot-carousel">
+            <el-carousel-item v-for="item in hotCourses" :key="item.ID">
+              <div class="hot-card" @click="goToDetail(item.ID)">
+                <img :src="item.cover_image || `https://picsum.photos/seed/${item.ID}/600/300`" class="hot-img"/>
+                <div class="hot-overlay">
+                  <div class="hot-info">
+                    <h3>{{ item.title }}</h3>
+                    <div class="hot-meta">
+                      <span><el-icon><View /></el-icon> {{ item.view_count }} 人正在学</span>
+                      <el-tag type="warning" effect="dark" size="small">HOT</el-tag>
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-          </el-carousel-item>
-        </el-carousel>
+            </el-carousel-item>
+          </el-carousel>
+        </div>
 
-        <div class="toolbar">
-          <el-tabs v-model="activeCategory" @tab-change="handleCategoryChange" class="category-tabs">
-            <el-tab-pane label="全部课程" name="all"></el-tab-pane>
-            <el-tab-pane label="前端开发" name="frontend"></el-tab-pane>
-            <el-tab-pane label="后端架构" name="backend"></el-tab-pane>
-            <el-tab-pane label="人工智能" name="ai"></el-tab-pane>
-            <el-tab-pane label="运维/测试" name="ops"></el-tab-pane>
+        <div class="toolbar-sticky">
+          <el-tabs v-model="activeCategory" @tab-change="handleCategoryChange" class="custom-tabs">
+            <el-tab-pane label="全部分类" name="all"></el-tab-pane>
+            <el-tab-pane label="💻 前端开发" name="frontend"></el-tab-pane>
+            <el-tab-pane label="⚙️ 后端架构" name="backend"></el-tab-pane>
+            <el-tab-pane label="🤖 人工智能" name="ai"></el-tab-pane>
+            <el-tab-pane label="🔧 运维测试" name="ops"></el-tab-pane>
           </el-tabs>
         </div>
 
-        <div class="course-list" v-loading="loading">
-          <el-empty v-if="courseList.length === 0" description="该分类下暂无课程" />
-          <el-card v-for="item in courseList" :key="item.ID" class="course-card" shadow="hover" @click="goToDetail(item.ID)">
+        <div class="course-grid" v-loading="loading">
+          <el-empty v-if="courseList.length === 0" description="暂无相关课程，敬请期待" image-size="200" />
+          <el-card v-for="item in courseList" :key="item.ID" class="course-card" :body-style="{ padding: '0px' }" shadow="hover" @click="goToDetail(item.ID)">
             <div class="image-wrapper">
-              <img :src="item.cover_image || `https://picsum.photos/seed/${item.ID}/300/180`" class="course-cover"/>
-              <div class="category-tag">{{ getCategoryName(item.category) }}</div>
+              <img :src="item.cover_image || `https://picsum.photos/seed/${item.ID}/300/180`" loading="lazy" class="course-cover"/>
+              <div class="category-badge">{{ getCategoryName(item.category) }}</div>
             </div>
-            <div class="card-body">
+            <div class="card-content">
               <h4 class="course-title" :title="item.title">{{ item.title }}</h4>
               <p class="course-desc">{{ item.description }}</p>
-              <div class="card-footer">
-                <div class="meta">
-                   <span class="price" v-if="item.price > 0">¥ {{ item.price }}</span>
-                   <el-tag type="success" size="small" v-else>免费</el-tag>
-                   <span class="views"><el-icon><View /></el-icon> {{ item.view_count }}</span>
-                </div>
-                <el-button type="primary" link>详情 >></el-button>
+              <div class="card-bottom">
+                 <div class="price-tag" v-if="item.price > 0">¥{{ item.price }}</div>
+                 <div class="price-tag free" v-else>免费</div>
+                 <span class="views"><el-icon><User /></el-icon> {{ item.view_count }}</span>
               </div>
             </div>
           </el-card>
@@ -71,111 +82,137 @@
       </div>
 
       <div v-else-if="userRole === 'teacher'" class="teacher-dashboard">
-        <div class="dashboard-header">
-          <h2>🎓 我的教学管理</h2>
-          <el-button type="primary" size="large" @click="showCreateDialog = true">
-            <el-icon style="margin-right: 5px"><Plus /></el-icon> 发布新课程
+        <div class="dashboard-header-flex">
+          <div>
+            <h2>🎓 教学工作台</h2>
+            <p style="color: #909399; margin: 5px 0 0;">管理您的课程与学生互动</p>
+          </div>
+          <el-button type="primary" size="large" icon="Plus" round @click="showCreateDialog = true" class="add-btn">
+             发布新课程
           </el-button>
         </div>
 
-        <el-alert title="欢迎回来，老师！这里仅显示您发布的课程。" type="info" show-icon style="margin-bottom: 20px;" />
-
-        <div class="teacher-workbench" style="margin-bottom: 30px; display: flex; gap: 20px;">
-           <el-card style="flex: 1;" shadow="hover">
-              <template #header><div class="card-header"><span>📝 待批改作业 ({{ todoData.homeworks.length }})</span></div></template>
-              <el-table :data="todoData.homeworks" height="200" style="width: 100%">
-                 <el-table-column prop="student_id" label="学生ID" width="80" />
-                 <el-table-column prop="content" label="作业内容" show-overflow-tooltip />
-                 <el-table-column label="操作" width="80">
-                    <template #default="scope"><el-button link type="primary" @click="openGrade(scope.row)">批改</el-button></template>
-                 </el-table-column>
-              </el-table>
+        <div class="stats-row">
+           <el-card class="stat-card" shadow="hover">
+              <div class="stat-icon bg-blue"><el-icon><Reading /></el-icon></div>
+              <div class="stat-info">
+                <div class="label">我的课程</div>
+                <div class="num">{{ teacherCourses.length }}</div>
+              </div>
            </el-card>
-
-           <el-card style="flex: 1;" shadow="hover">
-              <template #header><div class="card-header"><span>💬 待回复提问 ({{ todoData.questions.length }})</span></div></template>
-              <el-table :data="todoData.questions" height="200" style="width: 100%">
-                 <el-table-column label="学生"><template #default="scope">{{ scope.row.student?.username || scope.row.student_id }}</template></el-table-column>
-                 <el-table-column prop="Content" label="问题" show-overflow-tooltip />
-                 <el-table-column label="操作" width="80">
-                    <template #default="scope"><el-button link type="success" @click="openReply(scope.row)">回复</el-button></template>
-                 </el-table-column>
-              </el-table>
+           <el-card class="stat-card" shadow="hover">
+              <div class="stat-icon bg-orange"><el-icon><EditPen /></el-icon></div>
+              <div class="stat-info">
+                <div class="label">待批改</div>
+                <div class="num">{{ todoData.homeworks.length }}</div>
+              </div>
+           </el-card>
+           <el-card class="stat-card" shadow="hover">
+              <div class="stat-icon bg-green"><el-icon><ChatDotSquare /></el-icon></div>
+              <div class="stat-info">
+                <div class="label">新提问</div>
+                <div class="num">{{ todoData.questions.length }}</div>
+              </div>
            </el-card>
         </div>
 
-        <el-table :data="teacherCourses" v-loading="loading" border stripe style="width: 100%">
-          <el-table-column prop="title" label="课程标题" />
-          <el-table-column label="状态" width="100">
+        <div class="workbench-grid">
+           <el-card class="work-card" shadow="hover">
+              <template #header><div class="card-header"><span>📝 待批改作业</span></div></template>
+              <el-table :data="todoData.homeworks" height="250" style="width: 100%" :show-header="false">
+                 <el-table-column>
+                    <template #default="scope">
+                      <div class="todo-item">
+                        <el-tag size="small">ID:{{scope.row.student_id}}</el-tag>
+                        <span class="todo-content text-truncate">{{ scope.row.content }}</span>
+                        <el-button size="small" type="primary" plain round @click="openGrade(scope.row)">批改</el-button>
+                      </div>
+                    </template>
+                 </el-table-column>
+              </el-table>
+              <el-empty v-if="todoData.homeworks.length === 0" description="暂无作业" :image-size="60" />
+           </el-card>
+
+           <el-card class="work-card" shadow="hover">
+              <template #header><div class="card-header"><span>💬 待回复提问</span></div></template>
+              <el-table :data="todoData.questions" height="250" style="width: 100%" :show-header="false">
+                 <el-table-column>
+                    <template #default="scope">
+                       <div class="todo-item">
+                          <div class="user-cell">
+                            <el-avatar :size="24" style="background:#67C23A">{{ scope.row.student?.username?.charAt(0) }}</el-avatar>
+                            <span class="username">{{ scope.row.student?.username }}</span>
+                          </div>
+                          <span class="todo-content text-truncate">{{ scope.row.Content }}</span>
+                          <el-button size="small" type="success" plain round @click="openReply(scope.row)">回复</el-button>
+                       </div>
+                    </template>
+                 </el-table-column>
+              </el-table>
+              <el-empty v-if="todoData.questions.length === 0" description="暂无提问" :image-size="60" />
+           </el-card>
+        </div>
+
+        <h3 class="sub-title">我的课程列表</h3>
+        <el-table :data="teacherCourses" v-loading="loading" class="custom-table" border>
+          <el-table-column prop="title" label="课程标题" min-width="200" />
+          <el-table-column label="状态" width="120" align="center">
             <template #default="scope">
-              <el-tag v-if="scope.row.status === 1" type="success">已发布</el-tag>
-              <el-tag v-else-if="scope.row.status === 2" type="danger">已驳回</el-tag>
-              <el-tag v-else type="warning">待审核</el-tag>
+              <el-tag v-if="scope.row.status === 1" type="success" effect="dark">已发布</el-tag>
+              <el-tag v-else-if="scope.row.status === 2" type="danger" effect="dark">已驳回</el-tag>
+              <el-tag v-else type="warning" effect="dark">审核中</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="view_count" label="浏览量" width="80" sortable />
-          <el-table-column label="操作" width="150">
+          <el-table-column prop="view_count" label="浏览" width="100" align="center" sortable />
+          <el-table-column label="操作" width="180" align="center">
             <template #default="scope">
-              <el-button link type="primary" @click="goToDetail(scope.row.ID)">详情</el-button>
-              <el-button link type="warning" @click="openEditDialog(scope.row)">编辑</el-button>
+              <el-button link type="primary" icon="View" @click="goToDetail(scope.row.ID)">详情</el-button>
+              <el-button link type="primary" icon="Edit" @click="openEditDialog(scope.row)">编辑</el-button>
             </template>
           </el-table-column>
         </el-table>
       </div>
 
       <div v-else-if="userRole === 'admin'" class="admin-dashboard">
-        <div class="dashboard-header" style="margin-bottom: 20px;">
-           <h2>🖥️ 平台数据监控</h2>
-           <el-button type="primary" link icon="Refresh" @click="fetchAdminStats">刷新数据</el-button>
+        <div class="dashboard-header-flex">
+           <div>
+             <h2>🖥️ 平台数据监控</h2>
+             <p style="color: #909399; margin: 5px 0 0;">系统核心指标实时概览</p>
+           </div>
+           <el-button type="primary" plain icon="Refresh" circle @click="fetchAdminStats"></el-button>
         </div>
 
         <el-row :gutter="20" class="stat-row">
-          <el-col :span="6">
-            <el-card shadow="hover" class="stat-card">
-              <template #header><div class="card-header">👥 注册用户</div></template>
-              <div class="stat-value">{{ adminStats.user_count }}</div>
-            </el-card>
-          </el-col>
-          <el-col :span="6">
-            <el-card shadow="hover" class="stat-card">
-              <template #header><div class="card-header">📚 总课程数</div></template>
-              <div class="stat-value">{{ adminStats.course_count }}</div>
-            </el-card>
-          </el-col>
-          <el-col :span="6">
-            <el-card shadow="hover" class="stat-card">
-              <template #header><div class="card-header">🔥 平台总浏览</div></template>
-              <div class="stat-value" style="color: #F56C6C">{{ adminStats.view_count || 0 }}</div>
-            </el-card>
-          </el-col>
-          <el-col :span="6">
-            <el-card shadow="hover" class="stat-card">
-              <template #header><div class="card-header">⏳ 待审核</div></template>
-              <div class="stat-value" style="color: #E6A23C">{{ adminStats.pending_count }}</div>
+          <el-col :span="6" v-for="(item, idx) in statCards" :key="idx">
+            <el-card shadow="hover" class="admin-stat-card">
+              <div class="stat-val" :style="{ color: item.color }">{{ item.value }}</div>
+              <div class="stat-lbl">{{ item.label }}</div>
+              <el-icon class="stat-bg-icon" :color="item.color"><component :is="item.icon" /></el-icon>
             </el-card>
           </el-col>
         </el-row>
 
-        <el-card class="audit-card" shadow="never" style="margin-top: 30px;">
+        <el-card class="audit-card" shadow="never">
           <template #header>
             <div class="card-header-flex">
-              <span style="font-weight: bold; font-size: 16px;">📝 待审核课程列表</span>
+              <span class="card-title">📝 待审核课程列表</span>
+              <el-tag type="warning" round>{{ adminStats.pending_count }} 待处理</el-tag>
             </div>
           </template>
           
-          <el-table :data="adminStats.pending_list" style="width: 100%" stripe border v-loading="loading">
-            <el-table-column label="提交教师" width="150">
+          <el-table :data="adminStats.pending_list" style="width: 100%" stripe v-loading="loading">
+            <el-table-column label="提交教师" width="180">
                <template #default="scope">
-                 <div style="display:flex; align-items:center; gap:5px;">
-                   <el-avatar :size="25" style="background:#409EFF">{{ scope.row.teacher?.username?.charAt(0).toUpperCase() }}</el-avatar>
-                   {{ scope.row.teacher?.username }}
+                 <div style="display:flex; align-items:center; gap:8px;">
+                   <el-avatar :size="28" style="background:#409EFF">{{ scope.row.teacher?.username?.charAt(0).toUpperCase() }}</el-avatar>
+                   <span style="font-weight:500">{{ scope.row.teacher?.username }}</span>
                  </div>
                </template>
             </el-table-column>
             <el-table-column prop="title" label="课程标题" />
-            <el-table-column label="分类" width="100">
+            <el-table-column label="分类" width="120">
                <template #default="scope">
-                  <el-tag>{{ getCategoryName(scope.row.category) }}</el-tag>
+                  <el-tag effect="light">{{ getCategoryName(scope.row.category) }}</el-tag>
                </template>
             </el-table-column>
             <el-table-column prop="price" label="价格" width="100">
@@ -184,34 +221,31 @@
             <el-table-column prop="created_at" label="提交时间" width="180">
                <template #default="scope">{{ new Date(scope.row.CreatedAt).toLocaleString() }}</template>
             </el-table-column>
-            <el-table-column label="操作" width="220" fixed="right">
+            <el-table-column label="操作" width="200" fixed="right">
               <template #default="scope">
-                 <el-button type="success" size="small" @click="auditCourse(scope.row.ID, 1)">通过</el-button>
-                 <el-button type="danger" size="small" @click="auditCourse(scope.row.ID, 2)">驳回</el-button>
-                 <el-button link type="primary" size="small" @click="goToDetail(scope.row.ID)">查看详情</el-button>
+                 <el-button type="success" size="small" icon="Check" circle @click="auditCourse(scope.row.ID, 1)"></el-button>
+                 <el-button type="danger" size="small" icon="Close" circle @click="auditCourse(scope.row.ID, 2)"></el-button>
+                 <el-button type="primary" link size="small" @click="goToDetail(scope.row.ID)">查看</el-button>
               </template>
             </el-table-column>
           </el-table>
           
-          <el-empty v-if="!adminStats.pending_list || adminStats.pending_list.length === 0" description="暂无待审核课程，太棒了！" />
+          <el-empty v-if="!adminStats.pending_list || adminStats.pending_list.length === 0" description="太棒了，所有课程都已审核完毕！" />
         </el-card>
       </div>
 
     </div>
 
-    <el-dialog v-model="showCreateDialog" title="👩‍🏫 发布新课程" width="600px">
+    <el-dialog v-model="showCreateDialog" title="👩‍🏫 发布新课程" width="600px" align-center>
       <el-form :model="newCourse" label-width="80px">
         <el-form-item label="课程标题"><el-input v-model="newCourse.title" placeholder="例如：Vue3 高级实战" /></el-form-item>
         <el-form-item label="课程分类">
           <el-select v-model="newCourse.category" placeholder="请选择分类" style="width: 100%">
-            <el-option label="前端开发" value="frontend" />
-            <el-option label="后端架构" value="backend" />
-            <el-option label="人工智能" value="ai" />
-            <el-option label="运维/测试" value="ops" />
+            <el-option label="前端开发" value="frontend" /><el-option label="后端架构" value="backend" />
+            <el-option label="人工智能" value="ai" /><el-option label="运维/测试" value="ops" />
           </el-select>
         </el-form-item>
         <el-form-item label="课程简介"><el-input v-model="newCourse.description" type="textarea" rows="3" /></el-form-item>
-        
         <el-form-item label="课程大纲">
           <div style="width: 100%">
             <div v-for="(item, index) in outlineList" :key="index" style="display: flex; gap: 10px; margin-bottom: 10px;">
@@ -222,29 +256,20 @@
             <el-button type="primary" link size="small" @click="addChapter"><el-icon><Plus /></el-icon> 添加章节</el-button>
           </div>
         </el-form-item>
-        <el-form-item label="作业布置">
-           <el-input v-model="newCourse.homework_req" type="textarea" rows="3" placeholder="请输入作业要求..." />
-        </el-form-item>
-        
-        <el-form-item label="课程价格">
-          <el-input-number v-model="newCourse.price" :min="0" :precision="2" />
-        </el-form-item>
-        <el-form-item label="课程视频">
-          <el-upload class="upload-demo" action="#" :http-request="uploadFile" :limit="1" accept=".mp4,.avi">
-            <el-button type="primary"><el-icon><VideoPlay /></el-icon> 上传视频</el-button>
+        <el-form-item label="作业要求"><el-input v-model="newCourse.homework_req" type="textarea" rows="3" /></el-form-item>
+        <el-form-item label="价格"><el-input-number v-model="newCourse.price" :min="0" :precision="2" controls-position="right" /></el-form-item>
+        <el-form-item label="视频上传">
+          <el-upload class="upload-demo" action="#" :http-request="uploadFile" :limit="1" accept=".mp4,.avi" :show-file-list="false">
+            <el-button :type="newCourse.video_url ? 'success' : 'primary'" :icon="VideoPlay">
+              {{ newCourse.video_url ? '视频已上传' : '点击上传视频' }}
+            </el-button>
           </el-upload>
-          <div v-if="newCourse.video_url" class="upload-success"><el-icon color="#67C23A"><CircleCheck /></el-icon> 成功</div>
         </el-form-item>
       </el-form>
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="showCreateDialog = false">取消</el-button>
-          <el-button type="primary" @click="createCourse" :loading="isSubmitting">发布</el-button>
-        </span>
-      </template>
+      <template #footer><el-button @click="showCreateDialog = false">取消</el-button><el-button type="primary" @click="createCourse" :loading="isSubmitting">立即发布</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="showEditDialog" title="🛠 修改课程信息" width="600px">
+    <el-dialog v-model="showEditDialog" title="🛠 修改课程信息" width="600px" align-center>
       <el-form :model="editForm" label-width="80px">
         <el-form-item label="课程标题"><el-input v-model="editForm.title" /></el-form-item>
         <el-form-item label="分类">
@@ -254,7 +279,6 @@
           </el-select>
         </el-form-item>
         <el-form-item label="简介"><el-input v-model="editForm.description" type="textarea" rows="2" /></el-form-item>
-        
         <el-form-item label="课程大纲">
           <div style="width: 100%">
             <div v-for="(item, index) in outlineList" :key="index" style="display: flex; gap: 10px; margin-bottom: 10px;">
@@ -265,97 +289,74 @@
             <el-button type="primary" link size="small" @click="addChapter"><el-icon><Plus /></el-icon> 添加章节</el-button>
           </div>
         </el-form-item>
-        <el-form-item label="作业布置">
-           <el-input v-model="editForm.homework_req" type="textarea" rows="3" />
-        </el-form-item>
-
-        <el-form-item label="价格"><el-input-number v-model="editForm.price" :min="0" :precision="2"/></el-form-item>
+        <el-form-item label="作业要求"><el-input v-model="editForm.homework_req" type="textarea" rows="3" /></el-form-item>
+        <el-form-item label="价格"><el-input-number v-model="editForm.price" :min="0" :precision="2" controls-position="right"/></el-form-item>
       </el-form>
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="showEditDialog = false">取消</el-button>
-          <el-button type="primary" @click="submitEdit" :loading="isSubmitting">保存</el-button>
-        </span>
-      </template>
+      <template #footer><el-button @click="showEditDialog = false">取消</el-button><el-button type="primary" @click="submitEdit" :loading="isSubmitting">保存修改</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="showGradeDialog" title="✍️ 批改作业" width="400px">
-        <el-form :model="gradeForm">
-            <el-form-item label="评分"><el-input-number v-model="gradeForm.score" :min="0" :max="100" /></el-form-item>
-            <el-form-item label="评语"><el-input v-model="gradeForm.comment" type="textarea" /></el-form-item>
+    <el-dialog v-model="showGradeDialog" title="✍️ 批改作业" width="400px" align-center>
+        <el-form :model="gradeForm" label-position="top">
+            <el-form-item label="评分 (0-100)"><el-input-number v-model="gradeForm.score" :min="0" :max="100" style="width:100%" /></el-form-item>
+            <el-form-item label="老师评语"><el-input v-model="gradeForm.comment" type="textarea" rows="3" placeholder="给学生一些鼓励或建议..." /></el-form-item>
         </el-form>
-        <template #footer>
-            <el-button @click="showGradeDialog = false">取消</el-button>
-            <el-button type="primary" @click="submitGrade">确认</el-button>
-        </template>
+        <template #footer><el-button @click="showGradeDialog = false">取消</el-button><el-button type="primary" @click="submitGrade">确认提交</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="showReplyDialog" title="🗣 回复学生" width="400px">
+    <el-dialog v-model="showReplyDialog" title="🗣 回复学生" width="400px" align-center>
         <el-form :model="replyForm">
-            <el-form-item label="内容"><el-input v-model="replyForm.answer" type="textarea" rows="4" /></el-form-item>
+            <el-form-item><el-input v-model="replyForm.answer" type="textarea" rows="5" placeholder="请输入您的详细解答..." /></el-form-item>
         </el-form>
-        <template #footer>
-            <el-button @click="showReplyDialog = false">取消</el-button>
-            <el-button type="primary" @click="submitReply">发送</el-button>
-        </template>
+        <template #footer><el-button @click="showReplyDialog = false">取消</el-button><el-button type="primary" @click="submitReply">发送回复</el-button></template>
     </el-dialog>
+
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import request from '../utils/request'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Plus, User, SwitchButton, VideoPlay, CircleCheck, ElementPlus, View, Edit, Delete, Refresh } from '@element-plus/icons-vue'
+import { 
+  Plus, User, SwitchButton, VideoPlay, ElementPlus, View, Edit, 
+  Delete, Refresh, CaretBottom, HotWater, Reading, EditPen, ChatDotSquare, Check, Close 
+} from '@element-plus/icons-vue'
 
 const router = useRouter()
 
-// --- 状态变量 ---
-const userRole = ref(localStorage.getItem('role') || 'student')
-const username = ref(localStorage.getItem('username') || '学员')
-const userId = ref(parseInt(localStorage.getItem('user_id') || 0))
+// 状态
+const userRole = ref(sessionStorage.getItem('role') || 'student')
+const username = ref(sessionStorage.getItem('username') || '学员')
+const userId = ref(parseInt(sessionStorage.getItem('user_id') || 0))
+const userAvatar = ref('') // 可扩展
 const courseList = ref([])
 const hotCourses = ref([]) 
 const loading = ref(false)
 const activeCategory = ref('all') 
 const isSubmitting = ref(false)
+let dashboardTimer = null 
 
 const showCreateDialog = ref(false)
 const showEditDialog = ref(false)
 const showGradeDialog = ref(false)
 const showReplyDialog = ref(false)
 
-// Teacher Only Data
 const todoData = ref({ homeworks: [], questions: [] })
-const gradeForm = ref({ id: 0, score: 0, comment: '' })
+const gradeForm = ref({ id: 0, score: 90, comment: '做得不错，继续加油！' })
 const replyForm = ref({ id: 0, answer: '' })
 
-// Admin Only Data
-const adminStats = ref({
-  user_count: 0,
-  course_count: 0,
-  view_count: 0,
-  pending_count: 0,
-  pending_list: []
-})
+const adminStats = ref({ user_count: 0, course_count: 0, view_count: 0, pending_count: 0, pending_list: [] })
 
-// Course Forms
 const outlineList = ref([{ title: '第一章', desc: '' }])
-const newCourse = ref({
-  title: '', description: '', price: 0, video_url: '', category: '', teacher_id: 0,
-  homework_req: '', outline: ''
-})
-const editForm = ref({
-  ID: 0, title: '', description: '', category: '', price: 0,
-  homework_req: '', outline: ''
-})
+const newCourse = ref({ title: '', description: '', price: 0, video_url: '', category: '', teacher_id: 0, homework_req: '', outline: '' })
+const editForm = ref({ ID: 0, title: '', description: '', category: '', price: 0, homework_req: '', outline: '' })
 
-// --- Computed ---
+// Computed
 const roleName = computed(() => {
-  if (userRole.value === 'teacher') return '教师'
-  if (userRole.value === 'admin') return '管理员'
-  return '学生'
+  if (userRole.value === 'teacher') return '金牌讲师'
+  if (userRole.value === 'admin') return '超级管理员'
+  return 'VIP学员'
 })
 
 const teacherCourses = computed(() => {
@@ -363,30 +364,33 @@ const teacherCourses = computed(() => {
   return courseList.value.filter(c => c.teacher_id === userId.value)
 })
 
+const statCards = computed(() => [
+  { label: '注册用户', value: adminStats.value.user_count, icon: 'User', color: '#409EFF' },
+  { label: '总课程数', value: adminStats.value.course_count, icon: 'Reading', color: '#67C23A' },
+  { label: '平台流量', value: adminStats.value.view_count || 0, icon: 'HotWater', color: '#F56C6C' },
+  { label: '待审核', value: adminStats.value.pending_count, icon: 'Timer', color: '#E6A23C' },
+])
+
 const getCategoryName = (key) => {
-  const map = { 'frontend': '前端', 'backend': '后端', 'ai': 'AI/算法', 'ops': '运维' }
-  return map[key] || '综合'
+  const map = { 'frontend': '前端开发', 'backend': '后端架构', 'ai': '人工智能', 'ops': '运维测试' }
+  return map[key] || '综合课程'
 }
 
-// --- Logic ---
+// Logic
 const addChapter = () => outlineList.value.push({ title: '', desc: '' })
 const removeChapter = (index) => outlineList.value.splice(index, 1)
 
-// 通用：获取课程列表
 const fetchCourses = async () => {
-  if (userRole.value === 'admin') return // 管理员用 fetchAdminStats
-  
+  if (userRole.value === 'admin') return
   loading.value = true
   try {
     const params = {}
     if (userRole.value !== 'teacher' && activeCategory.value !== 'all') params.category = activeCategory.value
     const res = await request.get('/courses', { params })
     courseList.value = res.data
-  } catch (e) {
-  } finally { loading.value = false }
+  } catch (e) {} finally { loading.value = false }
 }
 
-// 学生：获取热门课程
 const fetchHotCourses = async () => {
   if (userRole.value !== 'student') return
   try {
@@ -395,7 +399,6 @@ const fetchHotCourses = async () => {
   } catch (e) {}
 }
 
-// 教师：获取看板数据
 const fetchTeacherDashboard = async () => {
   if (userRole.value !== 'teacher') return
   try {
@@ -404,50 +407,37 @@ const fetchTeacherDashboard = async () => {
   } catch(e) {}
 }
 
-// 管理员：获取统计和审核数据
 const fetchAdminStats = async () => {
   if (userRole.value !== 'admin') return
   loading.value = true
   try {
     const res = await request.get('/admin/stats')
     adminStats.value = res
-  } catch (e) {
-  } finally { loading.value = false }
+  } catch (e) {} finally { loading.value = false }
 }
 
-// 管理员：审核操作
 const auditCourse = async (id, status) => {
   try {
     await request.put('/admin/audit', { id, status })
-    ElMessage.success(status === 1 ? '已通过该课程' : '已驳回该课程')
-    fetchAdminStats() // 操作后刷新
+    ElMessage.success(status === 1 ? '已通过' : '已驳回')
+    fetchAdminStats()
   } catch(e) {}
 }
 
-const handleCategoryChange = (tabName) => {
-  activeCategory.value = tabName 
-  fetchCourses()
-}
-
+const handleCategoryChange = () => fetchCourses()
 const goToDetail = (id) => router.push(`/course/${id}`)
+const logout = () => { sessionStorage.clear(); router.push('/login') }
 
-const logout = () => {
-  localStorage.clear()
-  router.push('/login')
-}
-
-// Upload
 const uploadFile = async (param) => {
   const formData = new FormData()
   formData.append('file', param.file)
   try {
     const res = await request.post('/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
     newCourse.value.video_url = res.url
-    ElMessage.success('视频上传成功')
+    ElMessage.success('上传成功')
   } catch (e) { ElMessage.error('上传失败') }
 }
 
-// Create
 const createCourse = async () => {
   if (!newCourse.value.title || !newCourse.value.video_url || !newCourse.value.category) return ElMessage.warning('信息不完整')
   isSubmitting.value = true
@@ -455,107 +445,121 @@ const createCourse = async () => {
     newCourse.value.teacher_id = userId.value
     newCourse.value.outline = JSON.stringify(outlineList.value)
     await request.post('/courses', newCourse.value)
-    ElMessage.success('发布成功，请等待管理员审核')
+    ElMessage.success('发布成功，请等待审核')
     showCreateDialog.value = false
     newCourse.value = { title: '', description: '', price: 0, video_url: '', category: '', homework_req: '', outline: '' }
     outlineList.value = [{ title: '第一章', desc: '' }]
     fetchCourses() 
-  } catch (e) { ElMessage.error('发布失败') } finally { isSubmitting.value = false }
+  } catch (e) {} finally { isSubmitting.value = false }
 }
 
-// Edit
 const openEditDialog = (item) => {
   editForm.value = { ...item }
-  try {
-    outlineList.value = item.outline ? JSON.parse(item.outline) : [{ title: '第一章', desc: '' }]
-  } catch(e) { outlineList.value = [{ title: '第一章', desc: '' }] }
+  try { outlineList.value = item.outline ? JSON.parse(item.outline) : [{ title: '第一章', desc: '' }] } 
+  catch(e) { outlineList.value = [{ title: '第一章', desc: '' }] }
   showEditDialog.value = true
 }
 
 const submitEdit = async () => {
   isSubmitting.value = true
   try {
-    await request.put(`/courses/${editForm.value.ID}`, {
-      ...editForm.value,
-      outline: JSON.stringify(outlineList.value)
-    })
+    await request.put(`/courses/${editForm.value.ID}`, { ...editForm.value, outline: JSON.stringify(outlineList.value) })
     ElMessage.success('修改成功')
     showEditDialog.value = false
     fetchCourses() 
-  } catch (e) { ElMessage.error('修改失败') } finally { isSubmitting.value = false }
+  } catch (e) {} finally { isSubmitting.value = false }
 }
 
-// Grade & Reply (Teacher)
-const openGrade = (hw) => {
-  gradeForm.value = { id: hw.ID, score: 80, comment: '做得不错！' }
-  showGradeDialog.value = true
-}
+const openGrade = (hw) => { gradeForm.value = { id: hw.ID, score: 90, comment: '' }; showGradeDialog.value = true }
 const submitGrade = async () => {
   await request.put('/homework/grade', gradeForm.value)
-  ElMessage.success('批改完成')
-  showGradeDialog.value = false
-  fetchTeacherDashboard() 
+  ElMessage.success('批改完成'); showGradeDialog.value = false; fetchTeacherDashboard() 
 }
-const openReply = (q) => {
-  replyForm.value = { id: q.ID, answer: '' }
-  showReplyDialog.value = true
-}
+const openReply = (q) => { replyForm.value = { id: q.ID, answer: '' }; showReplyDialog.value = true }
 const submitReply = async () => {
   await request.put('/questions/reply', replyForm.value)
-  ElMessage.success('回复成功')
-  showReplyDialog.value = false
-  fetchTeacherDashboard() 
+  ElMessage.success('回复成功'); showReplyDialog.value = false; fetchTeacherDashboard() 
 }
 
-// 生命周期挂载
 onMounted(() => {
-  if (userRole.value === 'student') {
-    fetchCourses()
-    fetchHotCourses()
-  } else if (userRole.value === 'teacher') {
-    fetchCourses()
-    fetchTeacherDashboard()
-  } else if (userRole.value === 'admin') {
-    // 关键：管理员登录直接拉取监控数据
-    fetchAdminStats()
-  }
+  if (userRole.value === 'student') { fetchCourses(); fetchHotCourses() } 
+  else if (userRole.value === 'teacher') { fetchCourses(); fetchTeacherDashboard(); dashboardTimer = setInterval(fetchTeacherDashboard, 5000) } 
+  else if (userRole.value === 'admin') { fetchAdminStats() }
 })
+onUnmounted(() => { if (dashboardTimer) clearInterval(dashboardTimer) })
 </script>
 
 <style scoped>
-.home-container { min-height: 100vh; background-color: #f5f7fa; }
-.header { background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; padding: 0 40px; height: 60px; }
-.logo-area { display: flex; align-items: center; gap: 10px; font-weight: bold; color: #303133; font-size: 20px;}
-.user-area { display: flex; align-items: center; gap: 10px; }
-.main-content { max-width: 1200px; margin: 20px auto; padding: 0 20px; }
+/* 全局布局 */
+.home-container { min-height: 100vh; background-color: #f6f8fc; }
+.header { 
+  background: #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.03); 
+  display: flex; justify-content: space-between; align-items: center; 
+  padding: 0 40px; height: 64px; position: sticky; top: 0; z-index: 100;
+}
+.logo-area { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+.logo-bg { width: 36px; height: 36px; background: linear-gradient(135deg, #409EFF, #337ecc); border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+.logo-text { font-size: 22px; font-weight: 800; color: #2c3e50; letter-spacing: -0.5px; }
+.user-area { display: flex; align-items: center; gap: 12px; }
+.user-link { cursor: pointer; display: flex; align-items: center; font-size: 14px; color: #606266; transition: 0.2s; }
+.user-link:hover { color: #409EFF; }
+.main-content { max-width: 1280px; margin: 30px auto; padding: 0 20px; }
 
-/* 学生端样式 */
-.section-title h3 { margin: 20px 0 15px; border-left: 5px solid #ff6b6b; padding-left: 15px; color: #303133;}
-.hot-card { position: relative; height: 100%; cursor: pointer; border-radius: 8px; overflow: hidden;}
-.hot-img { width: 100%; height: 100%; object-fit: cover; filter: brightness(0.8); transition: 0.3s;}
-.hot-card:hover .hot-img { filter: brightness(1); transform: scale(1.05);}
-.hot-info { position: absolute; bottom: 0; left: 0; right: 0; padding: 20px; background: linear-gradient(to top, rgba(0,0,0,0.8), transparent); color: white; }
-.toolbar { display: flex; justify-content: space-between; align-items: center; margin-top: 30px; margin-bottom: 20px; }
-.course-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 25px; }
-.course-card { border-radius: 8px; border: none; transition: 0.3s; cursor: pointer; }
-.course-card:hover { transform: translateY(-5px); box-shadow: 0 10px 20px rgba(0,0,0,0.1); }
-.image-wrapper { position: relative; height: 160px; overflow: hidden; }
+/* 学生端 */
+.welcome-banner { margin-bottom: 30px; }
+.welcome-banner h2 { margin: 0; font-size: 28px; color: #2c3e50; }
+.welcome-banner p { color: #909399; margin: 8px 0 0; }
+.section-title { font-size: 20px; display: flex; align-items: center; gap: 8px; margin-bottom: 20px; }
+.hot-carousel { margin-bottom: 40px; }
+.hot-card { position: relative; height: 100%; border-radius: 12px; overflow: hidden; cursor: pointer; }
+.hot-img { width: 100%; height: 100%; object-fit: cover; transition: 0.5s; }
+.hot-overlay { position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 60%); display: flex; align-items: flex-end; padding: 20px; }
+.hot-info h3 { color: #fff; margin: 0 0 8px; font-size: 22px; text-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+.hot-meta { display: flex; justify-content: space-between; align-items: center; color: rgba(255,255,255,0.8); width: 100%; }
+.hot-card:hover .hot-img { transform: scale(1.08); }
+
+.toolbar-sticky { position: sticky; top: 70px; z-index: 10; background: #f6f8fc; padding: 10px 0; margin-bottom: 20px; }
+.custom-tabs :deep(.el-tabs__nav-wrap::after) { height: 0; }
+.course-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 30px; }
+.course-card { border-radius: 16px; border: none; transition: all 0.3s ease; }
+.course-card:hover { transform: translateY(-8px); box-shadow: 0 12px 24px rgba(0,0,0,0.08); }
+.image-wrapper { position: relative; height: 170px; overflow: hidden; }
 .course-cover { width: 100%; height: 100%; object-fit: cover; }
-.category-tag { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.6); color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
-.card-body { padding: 15px; }
-.course-title { font-size: 16px; margin: 0 0 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #303133;}
-.course-desc { font-size: 13px; color: #909399; margin-bottom: 15px; height: 40px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.card-footer { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #ebeef5; padding-top: 10px; }
-.meta { display: flex; gap: 10px; align-items: center; }
-.price { color: #F56C6C; font-weight: bold; }
-.views { font-size: 12px; color: #999; display: flex; align-items: center; gap: 2px; }
+.category-badge { position: absolute; top: 12px; right: 12px; background: rgba(0,0,0,0.65); backdrop-filter: blur(4px); color: #fff; padding: 4px 10px; border-radius: 6px; font-size: 12px; }
+.card-content { padding: 16px; }
+.course-title { margin: 0 0 8px; font-size: 16px; color: #2c3e50; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.course-desc { color: #909399; font-size: 13px; line-height: 1.5; margin-bottom: 16px; height: 40px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.card-bottom { display: flex; justify-content: space-between; align-items: center; }
+.price-tag { color: #ff6b6b; font-weight: bold; font-size: 18px; }
+.price-tag.free { color: #67C23A; }
+.views { font-size: 12px; color: #c0c4cc; display: flex; align-items: center; gap: 4px; }
 
-/* 教师端样式 */
-.teacher-dashboard { padding-top: 20px; }
-.dashboard-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-.upload-success { margin-top: 10px; font-size: 12px; color: #67C23A; display: flex; align-items: center; gap: 5px; }
+/* 教师端 & 管理员端 */
+.dashboard-header-flex { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
+.stats-row { display: flex; gap: 20px; margin-bottom: 30px; }
+.stat-card { flex: 1; border: none; border-radius: 12px; }
+.stat-card :deep(.el-card__body) { display: flex; align-items: center; padding: 25px; gap: 20px; }
+.stat-icon { width: 56px; height: 56px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 26px; color: #fff; }
+.bg-blue { background: linear-gradient(135deg, #409EFF, #ecf5ff); color: #409EFF; }
+.bg-orange { background: linear-gradient(135deg, #E6A23C, #fdf6ec); color: #E6A23C; }
+.bg-green { background: linear-gradient(135deg, #67C23A, #f0f9eb); color: #67C23A; }
+.stat-info .label { color: #909399; font-size: 14px; }
+.stat-info .num { font-size: 24px; font-weight: bold; color: #303133; margin-top: 5px; }
 
-/* 管理员端样式 */
-.stat-value { font-size: 32px; font-weight: bold; margin-top: 10px; color: #303133; }
-.stat-card { text-align: center; }
+.workbench-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; }
+.work-card { border-radius: 12px; border: none; }
+.card-header { font-weight: bold; font-size: 16px; border-left: 4px solid #409EFF; padding-left: 10px; }
+.todo-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px dashed #ebeef5; }
+.todo-content { flex: 1; margin: 0 15px; color: #606266; font-size: 14px; }
+.user-cell { display: flex; align-items: center; gap: 6px; width: 100px; }
+.username { font-size: 13px; font-weight: 500; }
+.text-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 管理员特有 */
+.admin-stat-card { text-align: center; position: relative; border-radius: 12px; overflow: hidden; height: 120px; display: flex; flex-direction: column; justify-content: center; }
+.stat-val { font-size: 32px; font-weight: 800; line-height: 1; margin-bottom: 8px; }
+.stat-lbl { color: #909399; font-size: 13px; }
+.stat-bg-icon { position: absolute; right: -10px; bottom: -10px; opacity: 0.1; font-size: 80px; transform: rotate(-15deg); }
+.card-header-flex { display: flex; justify-content: space-between; align-items: center; }
+.add-btn { box-shadow: 0 4px 12px rgba(64,158,255,0.4); }
 </style>
