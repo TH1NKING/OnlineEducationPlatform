@@ -1,0 +1,91 @@
+version: '3.8'
+
+services:
+  # 1. 接入层 & 负载均衡 (替代 AWS CloudFront + ELB)
+  # Nginx 负责反向代理、静态资源缓存和视频流转发
+  nginx:
+    image: nginx:latest
+    container_name: edu_gateway
+    ports:
+      - "80:80"      # HTTP 入口
+      - "443:443"    # HTTPS 入口 (如果配置SSL)
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d  # 挂载配置文件
+      - ./static:/usr/share/nginx/html    # 挂载静态前端文件
+    depends_on:
+      - backend
+      - minio
+    networks:
+      - edu_net
+
+
+  # 2. 业务后端 (替代 EC2)
+  # 这里只是一个示例占位符，之后替换成你写的 Go/Java/Python 镜像
+  backend:
+    image: golang:1.24-alpine # 假设你用 Go 写后端
+    container_name: edu_backend
+    working_dir: /app
+    # command: go run main.go  # 实际开发时的启动命令
+    tty: true                  # 保持容器运行
+    networks:
+      - edu_net
+    environment:
+      - DB_HOST=mysql
+      - REDIS_HOST=redis
+      - MINIO_ENDPOINT=minio:9000
+
+  # 3. 关系型数据库 (替代 AWS RDS)
+  mysql:
+    image: mysql:8.0
+    container_name: edu_db
+    ports:
+      - "3307:3306" # 暴露端口方便你用 Navicat/DataGrip 连接
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword # 设置密码
+      MYSQL_DATABASE: edu_platform      # 自动创建数据库
+    volumes:
+      - mysql_data:/var/lib/mysql       # 数据持久化，重启不丢失
+    networks:
+      - edu_net
+    command: --default-authentication-plugin=mysql_native_password
+
+  # 4. 对象存储 (替代 AWS S3)
+  # 专门用来存视频、课件、头像
+  minio:
+    image: minio/minio
+    container_name: edu_oss
+    ports:
+      - "9000:9000" # API 端口 (代码调用)
+      - "9001:9001" # Console 端口 (浏览器管理界面)
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password123
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    networks:
+      - edu_net
+
+  # 5. 缓存 (替代 AWS ElastiCache - 虽未提及但高并发必备)
+  redis:
+    image: redis:alpine
+    container_name: edu_cache
+    networks:
+      - edu_net
+  adminer:
+    image: adminer
+    ports:
+      - "8081:8080"
+    networks:
+      - edu_net
+
+# 定义网络 (模拟 AWS VPC)
+networks:
+  edu_net:
+    driver: bridge
+
+# 定义卷 (模拟 EBS 硬盘)
+volumes:
+  mysql_data:
+  minio_data:
+
