@@ -8,6 +8,11 @@
       
       <div class="user-area">
         <span class="welcome-text">你好, {{ username }} ({{ roleName }})</span>
+        
+        <el-button v-if="userRole === 'admin'" type="warning" @click="$router.push('/admin')">
+           <el-icon style="margin-right: 5px"><Monitor /></el-icon> 审核监控台
+        </el-button>
+
         <el-button type="primary" link @click="$router.push('/profile')">
           <el-icon><User /></el-icon> 个人中心
         </el-button>
@@ -20,10 +25,11 @@
 
     <div class="main-content">
       
-      <div v-if="userRole !== 'teacher'">
+      <div v-if="userRole === 'student'">
         <div class="section-title">
           <h3>🔥 热门课程推荐</h3>
         </div>
+        
         <el-carousel :interval="4000" type="card" height="220px" v-if="hotCourses.length > 0">
           <el-carousel-item v-for="item in hotCourses" :key="item.ID">
             <div class="hot-card" @click="goToDetail(item.ID)">
@@ -54,14 +60,15 @@
             :key="item.ID" 
             class="course-card" 
             shadow="hover"
+            @click="goToDetail(item.ID)"
           >
-            <div class="image-wrapper" @click="goToDetail(item.ID)">
+            <div class="image-wrapper">
               <img :src="item.cover_image || `https://picsum.photos/seed/${item.ID}/300/180`" class="course-cover"/>
               <div class="category-tag">{{ getCategoryName(item.category) }}</div>
             </div>
             
             <div class="card-body">
-              <h4 class="course-title" :title="item.title" @click="goToDetail(item.ID)">{{ item.title }}</h4>
+              <h4 class="course-title" :title="item.title">{{ item.title }}</h4>
               <p class="course-desc">{{ item.description }}</p>
               
               <div class="card-footer">
@@ -70,20 +77,14 @@
                    <el-tag type="success" size="small" v-else>免费</el-tag>
                    <span class="views"><el-icon><View /></el-icon> {{ item.view_count }}</span>
                 </div>
-
-                <div>
-                  <el-button v-if="userRole === 'admin'" type="warning" link size="small" @click.stop="openEditDialog(item)">
-                    <el-icon><Edit /></el-icon> 修改
-                  </el-button>
-                  <el-button v-else type="primary" link @click="goToDetail(item.ID)">详情 >></el-button>
-                </div>
+                <el-button type="primary" link>详情 >></el-button>
               </div>
             </div>
           </el-card>
         </div>
       </div>
 
-      <div v-else class="teacher-dashboard">
+      <div v-else-if="userRole === 'teacher'" class="teacher-dashboard">
         <div class="dashboard-header">
           <h2>🎓 我的教学管理</h2>
           <el-button type="primary" size="large" @click="showCreateDialog = true">
@@ -129,14 +130,18 @@
 
         <el-table :data="teacherCourses" v-loading="loading" border stripe style="width: 100%">
           <el-table-column prop="ID" label="ID" width="60" />
-          <el-table-column label="封面" width="120">
+          <el-table-column label="封面" width="100">
             <template #default="scope">
               <img :src="scope.row.cover_image || `https://picsum.photos/seed/${scope.row.ID}/100/60`" style="width: 80px; height: 50px; object-fit: cover; border-radius: 4px;" />
             </template>
           </el-table-column>
           <el-table-column prop="title" label="课程标题" />
-          <el-table-column label="分类" width="100">
-            <template #default="scope"><el-tag>{{ getCategoryName(scope.row.category) }}</el-tag></template>
+          <el-table-column label="状态" width="100">
+            <template #default="scope">
+              <el-tag v-if="scope.row.status === 1" type="success">已发布</el-tag>
+              <el-tag v-else-if="scope.row.status === 2" type="danger">已驳回</el-tag>
+              <el-tag v-else type="warning">待审核</el-tag>
+            </template>
           </el-table-column>
           <el-table-column prop="view_count" label="浏览量" width="80" sortable />
           <el-table-column label="操作" width="150">
@@ -146,6 +151,22 @@
             </template>
           </el-table-column>
         </el-table>
+      </div>
+
+      <div v-else-if="userRole === 'admin'" class="admin-landing">
+         <el-empty description="欢迎进入管理员模式" image-size="200">
+            <template #extra>
+               <div style="text-align: center;">
+                 <h2 style="margin-top: 0; color: #303133;">系统管理中心</h2>
+                 <p style="color: #909399; margin-bottom: 30px; font-size: 16px;">
+                   您可以在此审核课程、监控全站流量及管理用户状态。
+                 </p>
+                 <el-button type="primary" size="large" icon="Monitor" @click="$router.push('/admin')">
+                    进入审核监控台
+                 </el-button>
+               </div>
+            </template>
+         </el-empty>
       </div>
     </div>
 
@@ -257,7 +278,7 @@ import { ref, computed, onMounted } from 'vue'
 import request from '../utils/request'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Plus, User, SwitchButton, VideoPlay, CircleCheck, ElementPlus, View, Edit, Delete } from '@element-plus/icons-vue'
+import { Plus, User, SwitchButton, VideoPlay, CircleCheck, ElementPlus, View, Edit, Delete, Monitor } from '@element-plus/icons-vue'
 
 const router = useRouter()
 
@@ -276,7 +297,7 @@ const showEditDialog = ref(false)
 const showGradeDialog = ref(false)
 const showReplyDialog = ref(false)
 
-// Dashboard data
+// Dashboard data (Teacher Only)
 const todoData = ref({ homeworks: [], questions: [] })
 const gradeForm = ref({ id: 0, score: 0, comment: '' })
 const replyForm = ref({ id: 0, answer: '' })
@@ -313,7 +334,11 @@ const getCategoryName = (key) => {
 const addChapter = () => outlineList.value.push({ title: '', desc: '' })
 const removeChapter = (index) => outlineList.value.splice(index, 1)
 
+// 获取课程列表
 const fetchCourses = async () => {
+  // 如果是管理员，Home页面只显示入口，不需要加载课程列表，直接返回
+  if (userRole.value === 'admin') return
+
   loading.value = true
   try {
     const params = {}
@@ -324,14 +349,16 @@ const fetchCourses = async () => {
   } finally { loading.value = false }
 }
 
+// 获取热门课程（仅学生可见）
 const fetchHotCourses = async () => {
-  if (userRole.value === 'teacher') return
+  if (userRole.value !== 'student') return
   try {
     const res = await request.get('/courses', { params: { sort: 'hot' } })
     hotCourses.value = res.data
   } catch (e) {}
 }
 
+// 获取教师看板数据
 const fetchTeacherDashboard = async () => {
   if (userRole.value !== 'teacher') return
   try {
@@ -371,8 +398,9 @@ const createCourse = async () => {
     newCourse.value.teacher_id = userId.value
     newCourse.value.outline = JSON.stringify(outlineList.value)
     await request.post('/courses', newCourse.value)
-    ElMessage.success('发布成功')
+    ElMessage.success('发布成功，请等待管理员审核')
     showCreateDialog.value = false
+    // 重置表单
     newCourse.value = { title: '', description: '', price: 0, video_url: '', category: '', homework_req: '', outline: '' }
     outlineList.value = [{ title: '第一章', desc: '' }]
     fetchCourses() 
@@ -401,7 +429,7 @@ const submitEdit = async () => {
   } catch (e) { ElMessage.error('修改失败') } finally { isSubmitting.value = false }
 }
 
-// Grade & Reply
+// Grade & Reply (Teacher)
 const openGrade = (hw) => {
   gradeForm.value = { id: hw.ID, score: 80, comment: '做得不错！' }
   showGradeDialog.value = true
@@ -424,9 +452,14 @@ const submitReply = async () => {
 }
 
 onMounted(() => {
-  fetchCourses()
-  if (userRole.value === 'teacher') fetchTeacherDashboard()
-  else fetchHotCourses()
+  if (userRole.value === 'student') {
+    fetchCourses()
+    fetchHotCourses()
+  } else if (userRole.value === 'teacher') {
+    fetchCourses()
+    fetchTeacherDashboard()
+  }
+  // admin 不需要加载任何课程数据，只显示入口
 })
 </script>
 
@@ -436,6 +469,9 @@ onMounted(() => {
 .logo-area { display: flex; align-items: center; gap: 10px; font-weight: bold; color: #303133; font-size: 20px;}
 .user-area { display: flex; align-items: center; gap: 10px; }
 .main-content { max-width: 1200px; margin: 20px auto; padding: 0 20px; }
+.admin-landing { padding-top: 50px; }
+
+/* 学生端样式 */
 .section-title h3 { margin: 20px 0 15px; border-left: 5px solid #ff6b6b; padding-left: 15px; color: #303133;}
 .hot-card { position: relative; height: 100%; cursor: pointer; border-radius: 8px; overflow: hidden;}
 .hot-img { width: 100%; height: 100%; object-fit: cover; filter: brightness(0.8); transition: 0.3s;}
@@ -455,6 +491,8 @@ onMounted(() => {
 .meta { display: flex; gap: 10px; align-items: center; }
 .price { color: #F56C6C; font-weight: bold; }
 .views { font-size: 12px; color: #999; display: flex; align-items: center; gap: 2px; }
+
+/* 教师端样式 */
 .teacher-dashboard { padding-top: 20px; }
 .dashboard-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
 .upload-success { margin-top: 10px; font-size: 12px; color: #67C23A; display: flex; align-items: center; gap: 5px; }
