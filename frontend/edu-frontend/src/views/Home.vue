@@ -8,11 +8,6 @@
       
       <div class="user-area">
         <span class="welcome-text">你好, {{ username }} ({{ roleName }})</span>
-        
-        <el-button v-if="userRole === 'admin'" type="warning" @click="$router.push('/admin')">
-           <el-icon style="margin-right: 5px"><Monitor /></el-icon> 审核监控台
-        </el-button>
-
         <el-button type="primary" link @click="$router.push('/profile')">
           <el-icon><User /></el-icon> 个人中心
         </el-button>
@@ -54,23 +49,14 @@
 
         <div class="course-list" v-loading="loading">
           <el-empty v-if="courseList.length === 0" description="该分类下暂无课程" />
-          
-          <el-card 
-            v-for="item in courseList" 
-            :key="item.ID" 
-            class="course-card" 
-            shadow="hover"
-            @click="goToDetail(item.ID)"
-          >
+          <el-card v-for="item in courseList" :key="item.ID" class="course-card" shadow="hover" @click="goToDetail(item.ID)">
             <div class="image-wrapper">
               <img :src="item.cover_image || `https://picsum.photos/seed/${item.ID}/300/180`" class="course-cover"/>
               <div class="category-tag">{{ getCategoryName(item.category) }}</div>
             </div>
-            
             <div class="card-body">
               <h4 class="course-title" :title="item.title">{{ item.title }}</h4>
               <p class="course-desc">{{ item.description }}</p>
-              
               <div class="card-footer">
                 <div class="meta">
                    <span class="price" v-if="item.price > 0">¥ {{ item.price }}</span>
@@ -96,45 +82,29 @@
 
         <div class="teacher-workbench" style="margin-bottom: 30px; display: flex; gap: 20px;">
            <el-card style="flex: 1;" shadow="hover">
-              <template #header>
-                <div class="card-header"><span>📝 待批改作业 ({{ todoData.homeworks.length }})</span></div>
-              </template>
+              <template #header><div class="card-header"><span>📝 待批改作业 ({{ todoData.homeworks.length }})</span></div></template>
               <el-table :data="todoData.homeworks" height="200" style="width: 100%">
                  <el-table-column prop="student_id" label="学生ID" width="80" />
                  <el-table-column prop="content" label="作业内容" show-overflow-tooltip />
                  <el-table-column label="操作" width="80">
-                    <template #default="scope">
-                       <el-button link type="primary" @click="openGrade(scope.row)">批改</el-button>
-                    </template>
+                    <template #default="scope"><el-button link type="primary" @click="openGrade(scope.row)">批改</el-button></template>
                  </el-table-column>
               </el-table>
            </el-card>
 
            <el-card style="flex: 1;" shadow="hover">
-              <template #header>
-                <div class="card-header"><span>💬 待回复提问 ({{ todoData.questions.length }})</span></div>
-              </template>
+              <template #header><div class="card-header"><span>💬 待回复提问 ({{ todoData.questions.length }})</span></div></template>
               <el-table :data="todoData.questions" height="200" style="width: 100%">
-                 <el-table-column label="学生">
-                    <template #default="scope">{{ scope.row.student?.username || scope.row.student_id }}</template>
-                 </el-table-column>
+                 <el-table-column label="学生"><template #default="scope">{{ scope.row.student?.username || scope.row.student_id }}</template></el-table-column>
                  <el-table-column prop="Content" label="问题" show-overflow-tooltip />
                  <el-table-column label="操作" width="80">
-                    <template #default="scope">
-                       <el-button link type="success" @click="openReply(scope.row)">回复</el-button>
-                    </template>
+                    <template #default="scope"><el-button link type="success" @click="openReply(scope.row)">回复</el-button></template>
                  </el-table-column>
               </el-table>
            </el-card>
         </div>
 
         <el-table :data="teacherCourses" v-loading="loading" border stripe style="width: 100%">
-          <el-table-column prop="ID" label="ID" width="60" />
-          <el-table-column label="封面" width="100">
-            <template #default="scope">
-              <img :src="scope.row.cover_image || `https://picsum.photos/seed/${scope.row.ID}/100/60`" style="width: 80px; height: 50px; object-fit: cover; border-radius: 4px;" />
-            </template>
-          </el-table-column>
           <el-table-column prop="title" label="课程标题" />
           <el-table-column label="状态" width="100">
             <template #default="scope">
@@ -153,21 +123,80 @@
         </el-table>
       </div>
 
-      <div v-else-if="userRole === 'admin'" class="admin-landing">
-         <el-empty description="欢迎进入管理员模式" image-size="200">
-            <template #extra>
-               <div style="text-align: center;">
-                 <h2 style="margin-top: 0; color: #303133;">系统管理中心</h2>
-                 <p style="color: #909399; margin-bottom: 30px; font-size: 16px;">
-                   您可以在此审核课程、监控全站流量及管理用户状态。
-                 </p>
-                 <el-button type="primary" size="large" icon="Monitor" @click="$router.push('/admin')">
-                    进入审核监控台
-                 </el-button>
-               </div>
-            </template>
-         </el-empty>
+      <div v-else-if="userRole === 'admin'" class="admin-dashboard">
+        <div class="dashboard-header" style="margin-bottom: 20px;">
+           <h2>🖥️ 平台数据监控</h2>
+           <el-button type="primary" link icon="Refresh" @click="fetchAdminStats">刷新数据</el-button>
+        </div>
+
+        <el-row :gutter="20" class="stat-row">
+          <el-col :span="6">
+            <el-card shadow="hover" class="stat-card">
+              <template #header><div class="card-header">👥 注册用户</div></template>
+              <div class="stat-value">{{ adminStats.user_count }}</div>
+            </el-card>
+          </el-col>
+          <el-col :span="6">
+            <el-card shadow="hover" class="stat-card">
+              <template #header><div class="card-header">📚 总课程数</div></template>
+              <div class="stat-value">{{ adminStats.course_count }}</div>
+            </el-card>
+          </el-col>
+          <el-col :span="6">
+            <el-card shadow="hover" class="stat-card">
+              <template #header><div class="card-header">🔥 平台总浏览</div></template>
+              <div class="stat-value" style="color: #F56C6C">{{ adminStats.view_count || 0 }}</div>
+            </el-card>
+          </el-col>
+          <el-col :span="6">
+            <el-card shadow="hover" class="stat-card">
+              <template #header><div class="card-header">⏳ 待审核</div></template>
+              <div class="stat-value" style="color: #E6A23C">{{ adminStats.pending_count }}</div>
+            </el-card>
+          </el-col>
+        </el-row>
+
+        <el-card class="audit-card" shadow="never" style="margin-top: 30px;">
+          <template #header>
+            <div class="card-header-flex">
+              <span style="font-weight: bold; font-size: 16px;">📝 待审核课程列表</span>
+            </div>
+          </template>
+          
+          <el-table :data="adminStats.pending_list" style="width: 100%" stripe border v-loading="loading">
+            <el-table-column label="提交教师" width="150">
+               <template #default="scope">
+                 <div style="display:flex; align-items:center; gap:5px;">
+                   <el-avatar :size="25" style="background:#409EFF">{{ scope.row.teacher?.username?.charAt(0).toUpperCase() }}</el-avatar>
+                   {{ scope.row.teacher?.username }}
+                 </div>
+               </template>
+            </el-table-column>
+            <el-table-column prop="title" label="课程标题" />
+            <el-table-column label="分类" width="100">
+               <template #default="scope">
+                  <el-tag>{{ getCategoryName(scope.row.category) }}</el-tag>
+               </template>
+            </el-table-column>
+            <el-table-column prop="price" label="价格" width="100">
+               <template #default="scope">¥{{ scope.row.price }}</template>
+            </el-table-column>
+            <el-table-column prop="created_at" label="提交时间" width="180">
+               <template #default="scope">{{ new Date(scope.row.CreatedAt).toLocaleString() }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="220" fixed="right">
+              <template #default="scope">
+                 <el-button type="success" size="small" @click="auditCourse(scope.row.ID, 1)">通过</el-button>
+                 <el-button type="danger" size="small" @click="auditCourse(scope.row.ID, 2)">驳回</el-button>
+                 <el-button link type="primary" size="small" @click="goToDetail(scope.row.ID)">查看详情</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          
+          <el-empty v-if="!adminStats.pending_list || adminStats.pending_list.length === 0" description="暂无待审核课程，太棒了！" />
+        </el-card>
       </div>
+
     </div>
 
     <el-dialog v-model="showCreateDialog" title="👩‍🏫 发布新课程" width="600px">
@@ -278,7 +307,7 @@ import { ref, computed, onMounted } from 'vue'
 import request from '../utils/request'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Plus, User, SwitchButton, VideoPlay, CircleCheck, ElementPlus, View, Edit, Delete, Monitor } from '@element-plus/icons-vue'
+import { Plus, User, SwitchButton, VideoPlay, CircleCheck, ElementPlus, View, Edit, Delete, Refresh } from '@element-plus/icons-vue'
 
 const router = useRouter()
 
@@ -297,10 +326,19 @@ const showEditDialog = ref(false)
 const showGradeDialog = ref(false)
 const showReplyDialog = ref(false)
 
-// Dashboard data (Teacher Only)
+// Teacher Only Data
 const todoData = ref({ homeworks: [], questions: [] })
 const gradeForm = ref({ id: 0, score: 0, comment: '' })
 const replyForm = ref({ id: 0, answer: '' })
+
+// Admin Only Data
+const adminStats = ref({
+  user_count: 0,
+  course_count: 0,
+  view_count: 0,
+  pending_count: 0,
+  pending_list: []
+})
 
 // Course Forms
 const outlineList = ref([{ title: '第一章', desc: '' }])
@@ -334,11 +372,10 @@ const getCategoryName = (key) => {
 const addChapter = () => outlineList.value.push({ title: '', desc: '' })
 const removeChapter = (index) => outlineList.value.splice(index, 1)
 
-// 获取课程列表
+// 通用：获取课程列表
 const fetchCourses = async () => {
-  // 如果是管理员，Home页面只显示入口，不需要加载课程列表，直接返回
-  if (userRole.value === 'admin') return
-
+  if (userRole.value === 'admin') return // 管理员用 fetchAdminStats
+  
   loading.value = true
   try {
     const params = {}
@@ -349,7 +386,7 @@ const fetchCourses = async () => {
   } finally { loading.value = false }
 }
 
-// 获取热门课程（仅学生可见）
+// 学生：获取热门课程
 const fetchHotCourses = async () => {
   if (userRole.value !== 'student') return
   try {
@@ -358,12 +395,32 @@ const fetchHotCourses = async () => {
   } catch (e) {}
 }
 
-// 获取教师看板数据
+// 教师：获取看板数据
 const fetchTeacherDashboard = async () => {
   if (userRole.value !== 'teacher') return
   try {
     const res = await request.get('/teacher/dashboard')
     todoData.value = res 
+  } catch(e) {}
+}
+
+// 管理员：获取统计和审核数据
+const fetchAdminStats = async () => {
+  if (userRole.value !== 'admin') return
+  loading.value = true
+  try {
+    const res = await request.get('/admin/stats')
+    adminStats.value = res
+  } catch (e) {
+  } finally { loading.value = false }
+}
+
+// 管理员：审核操作
+const auditCourse = async (id, status) => {
+  try {
+    await request.put('/admin/audit', { id, status })
+    ElMessage.success(status === 1 ? '已通过该课程' : '已驳回该课程')
+    fetchAdminStats() // 操作后刷新
   } catch(e) {}
 }
 
@@ -400,7 +457,6 @@ const createCourse = async () => {
     await request.post('/courses', newCourse.value)
     ElMessage.success('发布成功，请等待管理员审核')
     showCreateDialog.value = false
-    // 重置表单
     newCourse.value = { title: '', description: '', price: 0, video_url: '', category: '', homework_req: '', outline: '' }
     outlineList.value = [{ title: '第一章', desc: '' }]
     fetchCourses() 
@@ -451,6 +507,7 @@ const submitReply = async () => {
   fetchTeacherDashboard() 
 }
 
+// 生命周期挂载
 onMounted(() => {
   if (userRole.value === 'student') {
     fetchCourses()
@@ -458,8 +515,10 @@ onMounted(() => {
   } else if (userRole.value === 'teacher') {
     fetchCourses()
     fetchTeacherDashboard()
+  } else if (userRole.value === 'admin') {
+    // 关键：管理员登录直接拉取监控数据
+    fetchAdminStats()
   }
-  // admin 不需要加载任何课程数据，只显示入口
 })
 </script>
 
@@ -469,7 +528,6 @@ onMounted(() => {
 .logo-area { display: flex; align-items: center; gap: 10px; font-weight: bold; color: #303133; font-size: 20px;}
 .user-area { display: flex; align-items: center; gap: 10px; }
 .main-content { max-width: 1200px; margin: 20px auto; padding: 0 20px; }
-.admin-landing { padding-top: 50px; }
 
 /* 学生端样式 */
 .section-title h3 { margin: 20px 0 15px; border-left: 5px solid #ff6b6b; padding-left: 15px; color: #303133;}
@@ -496,4 +554,8 @@ onMounted(() => {
 .teacher-dashboard { padding-top: 20px; }
 .dashboard-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
 .upload-success { margin-top: 10px; font-size: 12px; color: #67C23A; display: flex; align-items: center; gap: 5px; }
+
+/* 管理员端样式 */
+.stat-value { font-size: 32px; font-weight: bold; margin-top: 10px; color: #303133; }
+.stat-card { text-align: center; }
 </style>

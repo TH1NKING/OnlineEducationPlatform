@@ -16,6 +16,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"encoding/json"
 )
 
 // ===========================
@@ -78,7 +79,21 @@ type Enrollment struct {
 	CourseID uint    `json:"course_id"`
 	Progress float64 `json:"progress"`
 	IsFinish bool    `json:"is_finish"`
+	Details  string  `json:"details" gorm:"type:text"`
 	Course   Course  `gorm:"foreignKey:CourseID" json:"course"`
+}
+
+// 用于数据库存储的 JSON 结构
+type ProgressState struct {
+	VideoDone bool  `json:"video_done"` // 视频是否看完
+	Chapters  []int `json:"chapters"`   // 已完成章节的下标数组 (0, 1, 2...)
+}
+
+// 前端请求参数
+type UpdateProgressReq struct {
+	CourseID   uint   `json:"course_id"`
+	Type       string `json:"type"`  // "video" 或 "chapter"
+	ChapterIdx int    `json:"index"` // 如果是 chapter，传入章节下标
 }
 
 type Homework struct {
@@ -198,8 +213,18 @@ func ListCoursesHandler(c *gin.Context) {
 	// 关键修改：只显示已发布(1)的课程
 	tx = tx.Where("status = ?", 1)
 
-	if category != "" && category != "all" { tx = tx.Where("category = ?", category) }
-	if sort == "hot" { tx = tx.Order("view_count desc").Limit(5) } else { tx = tx.Order("created_at desc") }
+	if category != "" && category != "all" {
+		tx = tx.Where("category = ?", category)
+	}
+
+	// === 修改位置 ===
+	if sort == "hot" {
+		// 原代码是 Limit(5)，修改为 Limit(3) 以仅显示前3名
+		tx = tx.Order("view_count desc").Limit(3)
+	} else {
+		tx = tx.Order("created_at desc")
+	}
+
 	tx.Find(&courses)
 	c.JSON(200, gin.H{"data": courses})
 }
@@ -340,12 +365,30 @@ func AdminAuditCourseHandler(c *gin.Context) {
 // --- 其他原有接口 (略微简化保留) ---
 func EnrollHandler(c *gin.Context) {
 	userID := c.MustGet("userID").(uint)
-	var req struct{ CourseID uint `json:"course_id"` }
-	c.ShouldBindJSON(&req)
+	var req struct {
+		CourseID uint `json:"course_id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "参数错误"})
+		return
+	}
+
+	// 检查是否已存在
 	var count int64
 	db.Model(&Enrollment{}).Where("user_id = ? AND course_id = ?", userID, req.CourseID).Count(&count)
-	if count > 0 { c.JSON(400, gin.H{"error": "已加入"}); return }
-	db.Create(&Enrollment{UserID: userID, CourseID: req.CourseID})
+	if count > 0 {
+		c.JSON(400, gin.H{"error": "已加入该课程"})
+		return
+	}
+
+	// === 修复：增加错误检查 ===
+	enroll := Enrollment{UserID: userID, CourseID: req.CourseID}
+	if err := db.Create(&enroll).Error; err != nil {
+		log.Println("❌ 加入课程失败:", err) // 打印具体错误到控制台
+		c.JSON(500, gin.H{"error": "加入课程失败，请联系管理员"})
+		return
+	}
+	
 	c.JSON(200, gin.H{"message": "加入成功"})
 }
 
@@ -419,6 +462,100 @@ func GetTeacherDashboardHandler(c *gin.Context) {
 	c.JSON(200, gin.H{"homeworks": homeworks, "questions": questions})
 }
 
+
+
+func UpdateProgressHandler(c *gin.Context) {
+	userID := c.MustGet("userID").(uint)
+	var req UpdateProgressReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "参数错误"})
+		return
+	}
+
+	// 1. 获取选课记录
+	var enroll Enrollment
+	if err := db.Where("user_id = ? AND course_id = ?", userID, req.CourseID).First(&enroll).Error; err != nil {
+		c.JSON(404, gin.H{"error": "未找到选课记录"})
+		return
+	}
+
+	// 2. 解析当前的进度详情
+	var state ProgressState
+	if enroll.Details != "" {
+		json.Unmarshal([]byte(enroll.Details), &state)
+	}
+	if state.Chapters == nil {
+		state.Chapters = []int{}
+	}
+
+	// 3. 更新状态
+	if req.Type == "video" {
+		state.VideoDone = true
+	} else if req.Type == "chapter" {
+		// 检查是否已经存在，避免重复添加
+		exists := false
+		for _, idx := range state.Chapters {
+			if idx == req.ChapterIdx {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			state.Chapters = append(state.Chapters, req.ChapterIdx)
+		}
+	}
+
+	// 4. 获取课程大纲以计算总章节数
+	var course Course
+	db.First(&course, req.CourseID)
+	
+	// 解析大纲计算章节总数
+	var outline []map[string]interface{}
+	totalChapters := 0
+	if course.Outline != "" {
+		json.Unmarshal([]byte(course.Outline), &outline)
+		totalChapters = len(outline)
+	}
+
+	// 5. 核心算法：计算进度
+	// 视频占 50%
+	// 章节占 50% (平均分配给每个章节)
+	newProgress := 0.0
+
+	// 视频部分
+	if state.VideoDone {
+		newProgress += 50.0
+	}
+
+	// 章节部分
+	if totalChapters > 0 {
+		chapterWeight := 50.0 / float64(totalChapters)
+		newProgress += float64(len(state.Chapters)) * chapterWeight
+	} else {
+		// 如果没有章节，视频看完就算100%
+		if state.VideoDone { newProgress = 100.0 }
+	}
+
+	// 封顶 100%
+	if newProgress > 100.0 {
+		newProgress = 100.0
+	}
+
+	// 6. 保存回数据库
+	stateBytes, _ := json.Marshal(state)
+	enroll.Details = string(stateBytes)
+	enroll.Progress = newProgress
+	enroll.IsFinish = (newProgress >= 100.0)
+
+	db.Save(&enroll)
+
+	c.JSON(200, gin.H{
+		"message":  "进度更新成功",
+		"progress": newProgress,
+		"details":  state, // 返回最新详情给前端更新UI
+	})
+}
+
 func main() {
 	initDB()
 	initMinIO() // 确保 MinIO 连接
@@ -458,6 +595,7 @@ func main() {
 			auth.PUT("/questions/reply", ReplyQuestionHandler)
 			auth.PUT("/homework/grade", GradeHomeworkHandler)
 			auth.GET("/teacher/dashboard", GetTeacherDashboardHandler)
+			auth.POST("/progress/update", UpdateProgressHandler) // 新增这一行
 
 			// === 管理员路由 ===
 			// 确保这里的路径与前端请求完全一致
