@@ -14,7 +14,7 @@
           <el-radio-group v-model="form.role">
             <el-radio label="student">学生</el-radio>
             <el-radio label="teacher">教师</el-radio>
-          </el-radio-group>
+            </el-radio-group>
         </el-form-item>
 
         <div class="btn-group">
@@ -43,6 +43,8 @@ const handleSubmit = async () => {
       const res = await request.post('/login', form.value)
       localStorage.setItem('token', res.token) // 存 Token
       localStorage.setItem('role', res.role)   // 存角色
+      localStorage.setItem('username', res.username)
+      localStorage.setItem('user_id', res.user_id)
       ElMessage.success('登录成功')
       router.push('/')
     } catch (e) {

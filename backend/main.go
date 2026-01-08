@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -19,7 +20,7 @@ import (
 )
 
 // ===========================
-// 1. 配置区域 (保持不变)
+// 1. 配置区域
 // ===========================
 const (
 	DB_DSN           = "root:rootpassword@tcp(192.168.31.143:3307)/edu_platform?charset=utf8mb4&parseTime=True&loc=Local"
@@ -33,7 +34,7 @@ const (
 )
 
 // ===========================
-// 2. 升级后的数据模型
+// 2. 数据模型
 // ===========================
 
 type User struct {
@@ -52,40 +53,47 @@ type Course struct {
 	CoverImage  string  `json:"cover_image"`
 	VideoURL    string  `json:"video_url"`
 	Price       float64 `json:"price"`
-	
-	// --- 新增字段 ---
-	Category    string  `json:"category"`    // 课程分类 (如: frontend, backend, ai)
-	ViewCount   int     `json:"view_count"`  // 浏览量/热度
-	// ----------------
-	
-	Homeworks []Homework `gorm:"foreignKey:CourseID" json:"homeworks"`
+	Category    string  `json:"category"`
+	ViewCount   int     `json:"view_count"`
+	Outline     string  `json:"outline" gorm:"type:text"`      // 存储 JSON 字符串: [{"title":"第一章","desc":"..."}, ...]
+	HomeworkReq string  `json:"homework_req" gorm:"type:text"`
+	Homeworks   []Homework `gorm:"foreignKey:CourseID" json:"homeworks"`
 }
 
-// Enrollment 选课记录/学习进度
+type Question struct {
+	gorm.Model
+	CourseID   uint   `json:"course_id"`
+	StudentID  uint   `json:"student_id"`
+	Student    User   `gorm:"foreignKey:StudentID" json:"student"` // 关联学生信息
+	Content    string `json:"content"`                             // 问题内容
+	Answer     string `json:"answer"`                              // 老师回复
+	TeacherID  uint   `json:"teacher_id"`                          // 回复的老师ID
+	IsAnswered bool   `json:"is_answered"`                         // 是否已回复
+}
+
 type Enrollment struct {
 	gorm.Model
 	UserID    uint    `json:"user_id"`
 	CourseID  uint    `json:"course_id"`
-	Progress  float64 `json:"progress"` // 学习进度 0-100
+	Progress  float64 `json:"progress"`
 	IsFinish  bool    `json:"is_finish"`
 	Course    Course  `gorm:"foreignKey:CourseID" json:"course"`
 }
 
-// Homework 作业与提交记录
 type Homework struct {
 	gorm.Model
 	CourseID  uint   `json:"course_id"`
 	StudentID uint   `json:"student_id"`
-	Content   string `json:"content"` // 学生提交的内容
-	Score     int    `json:"score"`   // 分数 (0代表未批改)
-	Comment   string `json:"comment"` // 老师评语
+	Content   string `json:"content"`
+	Score     int    `json:"score"`
+	Comment   string `json:"comment"`
 }
 
 var db *gorm.DB
 var minioClient *minio.Client
 
 // ===========================
-// 3. 辅助函数 (Init, JWT)
+// 3. 初始化与工具函数
 // ===========================
 
 func initDB() {
@@ -94,9 +102,46 @@ func initDB() {
 	if err != nil {
 		log.Fatalf("❌ 数据库连接失败: %v", err)
 	}
-	// 自动迁移所有表
-	db.AutoMigrate(&User{}, &Course{}, &Enrollment{}, &Homework{})
-	log.Println("✅ 数据库表结构已更新")
+	
+	// 自动迁移
+	db.AutoMigrate(&User{}, &Course{}, &Enrollment{}, &Homework{}, &Question{})
+
+	// --- 修复逻辑：更加健壮的管理员初始化 ---
+	var admin User
+	hashedPwd, _ := bcrypt.GenerateFromPassword([]byte("123456"), bcrypt.DefaultCost)
+	
+	// 使用 Unscoped() 以查找可能被软删除的记录，防止唯一键冲突
+	err = db.Unscoped().Where("username = ?", "admin").First(&admin).Error
+
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// 确实不存在，创建新账号
+		log.Println("⚡️ 未找到管理员，正在创建...")
+		adminUser := User{
+			Username: "admin",
+			Password: string(hashedPwd),
+			Role:     "admin",
+		}
+		if createErr := db.Create(&adminUser).Error; createErr != nil {
+			log.Printf("❌ 创建管理员失败: %v", createErr)
+		} else {
+			log.Println("✅ 管理员创建成功 -> 账号: admin / 密码: 123456")
+		}
+	} else {
+		// 存在（包括被软删除的），强制恢复并重置密码
+		log.Println("⚠️ 检测到已有管理员，正在重置状态和密码...")
+		
+		// 恢复被软删除的记录
+		if admin.DeletedAt.Valid {
+			db.Unscoped().Model(&admin).Update("deleted_at", nil)
+		}
+
+		// 更新密码和角色
+		db.Model(&admin).Updates(map[string]interface{}{
+			"password": string(hashedPwd),
+			"role":     "admin",
+		})
+		log.Println("✅ 管理员重置成功 -> 账号: admin / 密码: 123456")
+	}
 }
 
 func initMinIO() {
@@ -108,7 +153,6 @@ func initMinIO() {
 	if err != nil {
 		log.Fatalf("❌ MinIO 连接失败: %v", err)
 	}
-	// 确保桶存在 (省略重复代码，假设桶已存在)
 }
 
 func GenerateToken(userID uint, role string) (string, error) {
@@ -136,11 +180,18 @@ func AuthMiddleware() gin.HandlerFunc {
 		token, err := jwt.Parse(parts[1], func(token *jwt.Token) (interface{}, error) {
 			return []byte(JWT_SECRET), nil
 		})
+		
 		if err != nil || !token.Valid {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Token无效"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Token无效或已过期"})
 			return
 		}
-		claims := token.Claims.(jwt.MapClaims)
+
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Token解析失败"})
+			return
+		}
+
 		c.Set("userID", uint(claims["user_id"].(float64)))
 		c.Set("role", claims["role"].(string))
 		c.Next()
@@ -148,71 +199,87 @@ func AuthMiddleware() gin.HandlerFunc {
 }
 
 // ===========================
-// 4. 业务逻辑 Handlers
+// 4. Handler 逻辑
 // ===========================
 
-// 注册 & 登录 (保持之前逻辑，略微精简)
 func RegisterHandler(c *gin.Context) {
-	var user User
-	if err := c.ShouldBindJSON(&user); err != nil {
+	var input struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		Role     string `json:"role"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	hashedPwd, _ := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
-	user.Password = string(hashedPwd)
-	if user.Role == "" { user.Role = "student" }
+	if input.Username == "" || input.Password == "" {
+		c.JSON(400, gin.H{"error": "参数错误"})
+		return
+	}
+	if input.Role == "admin" {
+		c.JSON(403, gin.H{"error": "无法注册管理员"})
+		return
+	}
+	role := input.Role
+	if role == "" { role = "student" }
+
+	hashedPwd, _ := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
+	user := User{
+		Username: input.Username,
+		Password: string(hashedPwd),
+		Role:     role,
+	}
+	
 	if err := db.Create(&user).Error; err != nil {
-		c.JSON(500, gin.H{"error": "注册失败"})
+		c.JSON(500, gin.H{"error": "用户名已存在"})
 		return
 	}
 	c.JSON(200, gin.H{"message": "注册成功"})
 }
 
 func LoginHandler(c *gin.Context) {
-	var input User
-	c.ShouldBindJSON(&input)
+	var input struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(400, gin.H{"error": "参数错误"})
+		return
+	}
+	if input.Username == "" || input.Password == "" {
+		c.JSON(400, gin.H{"error": "参数错误"})
+		return
+	}
+
 	var user User
-	if err := db.Where("username = ?", input.Username).First(&user).Error; err != nil {
+	// 使用 Unscoped 以防之前被软删除导致无法登录
+	if err := db.Unscoped().Where("username = ?", input.Username).First(&user).Error; err != nil {
 		c.JSON(401, gin.H{"error": "用户不存在"})
 		return
 	}
+
 	if bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(input.Password)) != nil {
 		c.JSON(401, gin.H{"error": "密码错误"})
 		return
 	}
+
 	token, _ := GenerateToken(user.ID, user.Role)
 	c.JSON(200, gin.H{"token": token, "role": user.Role, "username": user.Username, "user_id": user.ID})
 }
 
-// --- 课程相关 ---
-
-func CreateCourseHandler(c *gin.Context) {
-	var course Course
-	if err := c.ShouldBindJSON(&course); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
-		return
-	}
-	// 设置默认初始热度
-	course.ViewCount = 0
-	db.Create(&course)
-	c.JSON(200, gin.H{"message": "发布成功", "data": course})
-}
+// --- 公开接口 ---
 
 func ListCoursesHandler(c *gin.Context) {
 	var courses []Course
 	category := c.Query("category")
-	sort := c.Query("sort") // sort=hot 代表热门
+	sort := c.Query("sort")
 
 	tx := db.Model(&Course{})
-
-	// 1. 分类筛选
 	if category != "" && category != "all" {
 		tx = tx.Where("category = ?", category)
 	}
-
-	// 2. 排序逻辑 (默认按时间倒序，热门按浏览量倒序)
 	if sort == "hot" {
-		tx = tx.Order("view_count desc").Limit(5) // 只取前5个热门
+		tx = tx.Order("view_count desc").Limit(5)
 	} else {
 		tx = tx.Order("created_at desc")
 	}
@@ -221,7 +288,6 @@ func ListCoursesHandler(c *gin.Context) {
 	c.JSON(200, gin.H{"data": courses})
 }
 
-// GetCourseDetailHandler 获取课程详情（包含是否已选课信息）
 func GetCourseDetailHandler(c *gin.Context) {
 	courseID := c.Param("id")
 	var course Course
@@ -229,40 +295,102 @@ func GetCourseDetailHandler(c *gin.Context) {
 		c.JSON(404, gin.H{"error": "课程不存在"})
 		return
 	}
+	
+	// 增加浏览量
 	db.Model(&course).UpdateColumn("view_count", gorm.Expr("view_count + ?", 1))
-	// ---------------------------------------
-	// 如果用户登录了，检查是否已选课
+	
+	// 检查是否已选课（手动解析Token，不强制要求登录）
 	isEnrolled := false
 	authHeader := c.GetHeader("Authorization")
-	if authHeader != "" {
-		// 简单解析一下 Token 拿 UserID，实际可以用中间件
-		parts := strings.Split(authHeader, " ")
-		if len(parts) == 2 {
-			token, _ := jwt.Parse(parts[1], func(token *jwt.Token) (interface{}, error) { return []byte(JWT_SECRET), nil })
-			if claims, ok := token.Claims.(jwt.MapClaims); ok {
-				uid := uint(claims["user_id"].(float64))
-				var count int64
-				db.Model(&Enrollment{}).Where("user_id = ? AND course_id = ?", uid, course.ID).Count(&count)
-				if count > 0 { isEnrolled = true }
-			}
+	if authHeader != "" && strings.Contains(authHeader, "Bearer ") {
+		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+		token, _ := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) { return []byte(JWT_SECRET), nil })
+		if token != nil && token.Valid {
+			claims := token.Claims.(jwt.MapClaims)
+			uid := uint(claims["user_id"].(float64))
+			var count int64
+			db.Model(&Enrollment{}).Where("user_id = ? AND course_id = ?", uid, course.ID).Count(&count)
+			if count > 0 { isEnrolled = true }
 		}
 	}
 
 	c.JSON(200, gin.H{"course": course, "is_enrolled": isEnrolled})
 }
 
-// --- 学习与作业相关 ---
+// --- 需鉴权接口 ---
 
-// EnrollHandler 学生选课
-func EnrollHandler(c *gin.Context) {
+func UploadHandler(c *gin.Context) {
+	file, err := c.FormFile("file")
+	if err != nil { c.JSON(400, gin.H{"error": "No file"}); return }
+	
+	bucket := BUCKET_PICTURES
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	if ext == ".mp4" || ext == ".avi" { bucket = BUCKET_VIDEOS }
+	
+	filename := fmt.Sprintf("%d_%s", time.Now().UnixNano(), file.Filename)
+	src, _ := file.Open(); defer src.Close()
+	
+	_, err = minioClient.PutObject(context.Background(), bucket, filename, src, file.Size, minio.PutObjectOptions{ContentType: "application/octet-stream"})
+	if err != nil {
+		c.JSON(500, gin.H{"error": "上传失败: " + err.Error()})
+		return
+	}
+	
+	url := fmt.Sprintf("http://%s/%s/%s", MINIO_ENDPOINT, bucket, filename)
+	c.JSON(200, gin.H{"url": url})
+}
+
+func CreateCourseHandler(c *gin.Context) {
+	var course Course
+	if err := c.ShouldBindJSON(&course); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	course.ViewCount = 0
+	db.Create(&course)
+	c.JSON(200, gin.H{"message": "发布成功"})
+}
+
+func UpdateCourseHandler(c *gin.Context) {
+	id := c.Param("id")
+	userRole := c.MustGet("role").(string)
 	userID := c.MustGet("userID").(uint)
-	var req struct { CourseID uint `json:"course_id"` }
+
+	var req Course
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "参数错误"})
 		return
 	}
+
+	var course Course
+	if err := db.First(&course, id).Error; err != nil {
+		c.JSON(404, gin.H{"error": "课程不存在"})
+		return
+	}
+
+	if userRole != "admin" && course.TeacherID != userID {
+		c.JSON(403, gin.H{"error": "权限不足"})
+		return
+	}
+
+	updates := make(map[string]interface{})
+	if req.Category != "" { updates["category"] = req.Category }
+	if req.Title != "" { updates["title"] = req.Title }
+	if req.Description != "" { updates["description"] = req.Description }
+	if req.Price >= 0 { updates["price"] = req.Price }
+	// 在 UpdateCourseHandler 函数内部的 updates map 赋值部分添加：
+	if req.Outline != "" { updates["outline"] = req.Outline }
+	if req.HomeworkReq != "" { updates["homework_req"] = req.HomeworkReq }
+
+	db.Model(&course).Updates(updates)
+	c.JSON(200, gin.H{"message": "更新成功"})
+}
+
+func EnrollHandler(c *gin.Context) {
+	userID := c.MustGet("userID").(uint)
+	var req struct { CourseID uint `json:"course_id"` }
+	c.ShouldBindJSON(&req)
 	
-	// 检查是否重复选课
 	var count int64
 	db.Model(&Enrollment{}).Where("user_id = ? AND course_id = ?", userID, req.CourseID).Count(&count)
 	if count > 0 {
@@ -270,30 +398,24 @@ func EnrollHandler(c *gin.Context) {
 		return
 	}
 
-	enroll := Enrollment{UserID: userID, CourseID: req.CourseID, Progress: 0}
+	enroll := Enrollment{UserID: userID, CourseID: req.CourseID}
 	db.Create(&enroll)
-	c.JSON(200, gin.H{"message": "加入课程成功！"})
+	c.JSON(200, gin.H{"message": "加入成功"})
 }
 
-// GetMyCoursesHandler 获取“我的课程”列表
 func GetMyCoursesHandler(c *gin.Context) {
 	userID := c.MustGet("userID").(uint)
 	var enrolls []Enrollment
-	// 预加载 Course 信息
 	db.Preload("Course").Where("user_id = ?", userID).Find(&enrolls)
 	c.JSON(200, gin.H{"data": enrolls})
 }
 
-// SubmitHomeworkHandler 提交作业
 func SubmitHomeworkHandler(c *gin.Context) {
 	userID := c.MustGet("userID").(uint)
 	var hw Homework
-	if err := c.ShouldBindJSON(&hw); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
-		return
-	}
+	c.ShouldBindJSON(&hw)
 	hw.StudentID = userID
-	// 简单的覆盖更新逻辑：如果交过，就更新内容
+	
 	var exist Homework
 	if err := db.Where("course_id = ? AND student_id = ?", hw.CourseID, userID).First(&exist).Error; err == nil {
 		exist.Content = hw.Content
@@ -301,31 +423,152 @@ func SubmitHomeworkHandler(c *gin.Context) {
 	} else {
 		db.Create(&hw)
 	}
-	c.JSON(200, gin.H{"message": "作业提交成功"})
+	c.JSON(200, gin.H{"message": "提交成功"})
 }
 
-// GetHomeworkHandler 获取某课程的作业信息
 func GetHomeworkHandler(c *gin.Context) {
 	userID := c.MustGet("userID").(uint)
 	courseID := c.Query("course_id")
 	var hw Homework
 	if err := db.Where("course_id = ? AND student_id = ?", courseID, userID).First(&hw).Error; err != nil {
-		c.JSON(200, gin.H{"exists": false}) // 没交过
+		c.JSON(200, gin.H{"exists": false})
 		return
 	}
 	c.JSON(200, gin.H{"exists": true, "data": hw})
 }
 
-// UploadHandler (保持不变)
-func UploadHandler(c *gin.Context) {
-	file, err := c.FormFile("file")
-	if err != nil { c.JSON(400, gin.H{"error": "No file"}); return }
-	bucket := BUCKET_PICTURES
-	if filepath.Ext(file.Filename) == ".mp4" { bucket = BUCKET_VIDEOS }
-	filename := fmt.Sprintf("%d_%s", time.Now().UnixNano(), file.Filename)
-	src, _ := file.Open(); defer src.Close()
-	minioClient.PutObject(context.Background(), bucket, filename, src, file.Size, minio.PutObjectOptions{ContentType: "application/octet-stream"})
-	c.JSON(200, gin.H{"url": fmt.Sprintf("http://%s/%s/%s", MINIO_ENDPOINT, bucket, filename)})
+func CreateQuestionHandler(c *gin.Context) {
+	userID := c.MustGet("userID").(uint)
+	var req struct {
+		CourseID uint   `json:"course_id"`
+		Content  string `json:"content"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "参数错误"})
+		return
+	}
+	
+	q := Question{
+		CourseID:   req.CourseID,
+		StudentID:  userID,
+		Content:    req.Content,
+		IsAnswered: false,
+	}
+	db.Create(&q)
+	c.JSON(200, gin.H{"message": "提问成功"})
+}
+
+// 获取某课程的问题列表
+func GetCourseQuestionsHandler(c *gin.Context) {
+	courseID := c.Query("course_id")
+	var questions []Question
+	// 预加载学生信息，以便显示是谁问的
+	db.Preload("Student").Where("course_id = ?", courseID).Order("created_at desc").Find(&questions)
+	c.JSON(200, gin.H{"data": questions})
+}
+
+// 教师回复问题
+func ReplyQuestionHandler(c *gin.Context) {
+	teacherID := c.MustGet("userID").(uint)
+	role := c.MustGet("role").(string)
+	
+	if role != "teacher" && role != "admin" {
+		c.JSON(403, gin.H{"error": "权限不足"})
+		return
+	}
+
+	var req struct {
+		ID     uint   `json:"id"`
+		Answer string `json:"answer"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "参数错误"})
+		return
+	}
+
+	var q Question
+	if err := db.First(&q, req.ID).Error; err != nil {
+		c.JSON(404, gin.H{"error": "问题不存在"})
+		return
+	}
+
+	q.Answer = req.Answer
+	q.TeacherID = teacherID
+	q.IsAnswered = true
+	db.Save(&q)
+	c.JSON(200, gin.H{"message": "回复成功"})
+}
+
+// --- 教师管理相关 ---
+
+// 教师批改作业
+func GradeHomeworkHandler(c *gin.Context) {
+	role := c.MustGet("role").(string)
+	if role != "teacher" && role != "admin" {
+		c.JSON(403, gin.H{"error": "只有教师可以批改"})
+		return
+	}
+
+	var req struct {
+		ID      uint   `json:"id"`
+		Score   int    `json:"score"`
+		Comment string `json:"comment"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "参数错误"})
+		return
+	}
+
+	var hw Homework
+	if err := db.First(&hw, req.ID).Error; err != nil {
+		c.JSON(404, gin.H{"error": "作业不存在"})
+		return
+	}
+
+	hw.Score = req.Score
+	hw.Comment = req.Comment
+	db.Save(&hw)
+	c.JSON(200, gin.H{"message": "批改完成"})
+}
+
+// 获取教师待办事项 (包括待批改作业和待回复问题)
+func GetTeacherDashboardHandler(c *gin.Context) {
+	teacherID := c.MustGet("userID").(uint)
+	role := c.MustGet("role").(string)
+	
+	if role != "teacher" {
+		c.JSON(403, gin.H{"error": "权限不足"})
+		return
+	}
+
+	// 1. 查找该老师发布的所有课程ID
+	var courseIDs []uint
+	db.Model(&Course{}).Where("teacher_id = ?", teacherID).Pluck("id", &courseIDs)
+
+	if len(courseIDs) == 0 {
+		c.JSON(200, gin.H{"homeworks": []interface{}{}, "questions": []interface{}{}})
+		return
+	}
+
+	// 2. 查找这些课程下，分数为0(未批改)的作业
+	// 这里我们需要关联 User 表来获取学生名字，但 Homework 结构体定义里没写关联User，
+	// 为了简化，我们这里只返回 StudentID，前端如果需要名字，最好在 Homework 结构体加 Student User 关联，
+	// 或者前端只显示 ID。为了展示效果，我临时在查询里手动 Join 一下或者简化处理。
+	// 这里我们假设前端只显示 StudentID 或者我们修改 Homework 结构体增加 `Student User` 字段（建议方案）。
+	// 鉴于不大幅改动已有结构，我们先只返回原始数据。
+	
+	var homeworks []Homework
+	// 简单的逻辑：Score 为 0 视为未批改
+	db.Where("course_id IN ? AND score = 0", courseIDs).Find(&homeworks)
+
+	// 3. 查找这些课程下，未回复的问题
+	var questions []Question
+	db.Preload("Student").Where("course_id IN ? AND is_answered = ?", courseIDs, false).Find(&questions)
+
+	c.JSON(200, gin.H{
+		"homeworks": homeworks,
+		"questions": questions,
+	})
 }
 
 // ===========================
@@ -337,34 +580,45 @@ func main() {
 	initMinIO()
 
 	r := gin.Default()
-	// CORS
+	
+	// CORS 中间件配置
 	r.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		if c.Request.Method == "OPTIONS" { c.AbortWithStatus(204); return }
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
 		c.Next()
 	})
 
 	api := r.Group("/api/v1")
 	{
+		// === 公开路由 (绝对不能加中间件) ===
 		api.POST("/register", RegisterHandler)
 		api.POST("/login", LoginHandler)
-		api.GET("/courses", ListCoursesHandler)
+		api.GET("/courses", ListCoursesHandler)      // 课程列表
 		api.GET("/courses/:id", GetCourseDetailHandler) // 课程详情
 
-		// 需登录接口
+		// === 需登录路由 ===
 		auth := api.Group("/")
-		auth.Use(AuthMiddleware())
+		auth.Use(AuthMiddleware()) // 只在这里挂载中间件
 		{
 			auth.POST("/upload", UploadHandler)
-			auth.POST("/courses", CreateCourseHandler) // 老师发课
+			auth.POST("/courses", CreateCourseHandler)
+			auth.PUT("/courses/:id", UpdateCourseHandler) // 管理员修改课程
 			
-			// 学生学习相关
-			auth.POST("/enroll", EnrollHandler)       // 加入课程
-			auth.GET("/my-courses", GetMyCoursesHandler) // 个人中心课程
-			auth.POST("/homework", SubmitHomeworkHandler) // 交作业
-			auth.GET("/homework", GetHomeworkHandler) // 看作业状态
+			auth.POST("/enroll", EnrollHandler)
+			auth.GET("/my-courses", GetMyCoursesHandler)
+			auth.POST("/homework", SubmitHomeworkHandler)
+			auth.GET("/homework", GetHomeworkHandler)
+			auth.POST("/questions", CreateQuestionHandler)      // 学生提问
+			auth.GET("/questions", GetCourseQuestionsHandler)   // 获取问题列表
+			auth.PUT("/questions/reply", ReplyQuestionHandler)  // 教师回复
+
+			auth.PUT("/homework/grade", GradeHomeworkHandler)       // 教师批改
+			auth.GET("/teacher/dashboard", GetTeacherDashboardHandler) // 教师获取待办数据
 		}
 	}
 
