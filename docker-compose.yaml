@@ -12,6 +12,7 @@ services:
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d  # 挂载配置文件
       - ./static:/usr/share/nginx/html    # 挂载静态前端文件
+      - ./nginx/ssl:/etc/nginx/ssl        # 把宿主机的证书目录挂载到容器内部
     depends_on:
       - backend
       - minio
@@ -25,6 +26,8 @@ services:
   backend:
     image: golang:1.25.1-alpine
     container_name: edu_backend
+    ports:
+      - "8080:8080"
     working_dir: /app
     volumes:
       - ./backend:/app # <---【关键】将当前目录挂载到容器的 /app
@@ -32,10 +35,15 @@ services:
     tty: true
     networks:
       - edu_net
+    command: sh -c "go build -o server main.go && ./server"
     environment:
+      - GIN_MODE=release
       - DB_HOST=mysql
       - REDIS_HOST=redis
       - MINIO_ENDPOINT=minio:9000
+      # 这里填你当前的局域网 IP
+      # 每次换环境（比如从宿舍回教室），只改这一行，然后重启容器即可
+      - PUBLIC_HOST=172.20.10.2
       # Go 开发国内常备加速代理
       - GOPROXY=https://goproxy.cn,direct
 
@@ -81,6 +89,26 @@ services:
     image: adminer
     ports:
       - "8081:8080"
+    networks:
+      - edu_net
+  # 6. 数据库自动备份 (新增服务)
+  db-backup:
+    image: fradelg/mysql-cron-backup
+    container_name: edu_db_backup
+    depends_on:
+      - mysql
+    volumes:
+      - ./backup:/backup  # 将备份文件挂载到宿主机的 backup 目录
+    environment:
+      - MYSQL_HOST=mysql              # 对应你的 mysql 服务名
+      - MYSQL_USER=root               # 数据库用户名
+      - MYSQL_PASS=rootpassword       # 数据库密码
+      - MYSQL_PORT=3306               # 内部端口
+      - MAX_BACKUPS=7                 # 保留最近7天的备份，自动删除旧的
+      - INIT_BACKUP=0                 # 启动时不立即备份，只按计划执行
+      # CRON 表达式：分 时 日 月 周
+      - TZ=Asia/Shanghai
+      - CRON_TIME=0 3 * * * # 每天凌晨 3:00 执行
     networks:
       - edu_net
 
