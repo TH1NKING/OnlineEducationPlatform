@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -21,9 +22,18 @@ import (
 // ===========================
 // 1. 配置区域
 // ===========================
-const (
-	DB_DSN           = "root:rootpassword@tcp(192.168.31.143:3307)/edu_platform?charset=utf8mb4&parseTime=True&loc=Local"
-	MINIO_ENDPOINT   = "192.168.31.143:9000"
+var (
+	// 【内部连接】直接用 Docker 服务名 "mysql" 和内部端口 "3306"
+	// 只要你的容器名叫 mysql，这里就永远不用变
+	DB_DSN = "root:rootpassword@tcp(mysql:3306)/edu_platform?charset=utf8mb4&parseTime=True&loc=Local"
+
+	// 【内部连接】MinIO 客户端连接用，直接用 Docker 服务名
+	MINIO_INTERNAL_ENDPOINT = "minio:9000"
+
+	// 【外部访问】这是发给前端的图片地址，需要跟随你的实际 IP 变动
+	// 我们稍后从环境变量里读
+	MINIO_PUBLIC_ENDPOINT = "localhost:9000"
+
 	MINIO_ACCESS_KEY = "admin"
 	MINIO_SECRET_KEY = "password123"
 	MINIO_USE_SSL    = false
@@ -96,6 +106,13 @@ type Homework struct {
 var db *gorm.DB
 var minioClient *minio.Client
 
+func initConfig() {
+	// 尝试从环境变量读取外部 IP，如果没读到就默认用 localhost
+	if envHost := os.Getenv("PUBLIC_HOST"); envHost != "" {
+		MINIO_PUBLIC_ENDPOINT = envHost + ":9000"
+	}
+}
+
 // ===========================
 // 3. 初始化与工具函数
 // ===========================
@@ -144,7 +161,7 @@ func initDB() {
 
 func initMinIO() {
 	var err error
-	minioClient, err = minio.New(MINIO_ENDPOINT, &minio.Options{
+	minioClient, err = minio.New(MINIO_INTERNAL_ENDPOINT, &minio.Options{
 		Creds:  credentials.NewStaticV4(MINIO_ACCESS_KEY, MINIO_SECRET_KEY, ""),
 		Secure: MINIO_USE_SSL,
 	})
@@ -183,7 +200,7 @@ func AuthMiddleware() gin.HandlerFunc {
 			return []byte(JWT_SECRET), nil
 		})
 
-// ... 之前的代码 ...
+		// ... 之前的代码 ...
 		if err != nil || !token.Valid {
 			c.AbortWithStatusJSON(401, gin.H{"error": "Token无效"})
 			return
@@ -191,7 +208,7 @@ func AuthMiddleware() gin.HandlerFunc {
 
 		claims := token.Claims.(jwt.MapClaims)
 		userID := uint(claims["user_id"].(float64))
-		
+
 		// =========== 🔴 修改开始：安全获取 version ===========
 		var tokenVer int
 		// 检查 "version" 字段是否存在
@@ -199,7 +216,7 @@ func AuthMiddleware() gin.HandlerFunc {
 			tokenVer = int(v.(float64))
 		} else {
 			// 如果 Token 里没有 version (说明是旧 Token)，默认为 0
-			tokenVer = 0 
+			tokenVer = 0
 		}
 		// =========== 🔴 修改结束 ===========
 
@@ -217,7 +234,7 @@ func AuthMiddleware() gin.HandlerFunc {
 		}
 
 		c.Set("userID", userID)
-// ... 之后的代码 ...
+		// ... 之后的代码 ...
 		c.Set("role", claims["role"].(string))
 		c.Next()
 	}
@@ -404,24 +421,39 @@ func UploadHandler(c *gin.Context) {
 		return
 	}
 	bucket := BUCKET_PICTURES
-	if ext := strings.ToLower(filepath.Ext(file.Filename)); ext == ".mp4" || ext == ".avi" {
+	contentType := "application/octet-stream" // 默认值
+
+	// 判断类型并设置正确的 Content-Type
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	if ext == ".mp4" {
 		bucket = BUCKET_VIDEOS
+		contentType = "video/mp4" // 关键修正：告诉浏览器这是mp4视频
+	} else if ext == ".avi" {
+		bucket = BUCKET_VIDEOS
+		contentType = "video/x-msvideo"
+	} else if ext == ".png" {
+		contentType = "image/png"
+	} else if ext == ".jpg" || ext == ".jpeg" {
+		contentType = "image/jpeg"
 	}
+
 	filename := fmt.Sprintf("%d_%s", time.Now().UnixNano(), file.Filename)
 	src, _ := file.Open()
 	defer src.Close()
-	_, err = minioClient.PutObject(context.Background(), bucket, filename, src, file.Size, minio.PutObjectOptions{ContentType: "application/octet-stream"})
+	_, err = minioClient.PutObject(context.Background(), bucket, filename, src, file.Size,
+		minio.PutObjectOptions{ContentType: contentType})
 	if err != nil {
 		c.JSON(500, gin.H{"error": "上传失败"})
 		return
 	}
-	c.JSON(200, gin.H{"url": fmt.Sprintf("http://%s/%s/%s", MINIO_ENDPOINT, bucket, filename)})
+	c.JSON(200, gin.H{"url": fmt.Sprintf("http://%s/%s/%s", MINIO_PUBLIC_ENDPOINT, bucket, filename)})
 }
 
 func CreateCourseHandler(c *gin.Context) {
 	var course Course
 	if err := c.ShouldBindJSON(&course); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()}); return
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
 	}
 	role := c.MustGet("role").(string)
 	course.ViewCount = 0
@@ -455,7 +487,9 @@ func UpdateCourseHandler(c *gin.Context) {
 
 func EnrollHandler(c *gin.Context) {
 	userID := c.MustGet("userID").(uint)
-	var req struct{ CourseID uint `json:"course_id"` }
+	var req struct {
+		CourseID uint `json:"course_id"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "参数错误"})
 		return
@@ -616,6 +650,7 @@ func AdminAuditCourseHandler(c *gin.Context) {
 }
 
 func main() {
+	initConfig()
 	initDB()
 	initMinIO()
 
